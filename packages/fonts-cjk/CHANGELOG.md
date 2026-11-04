@@ -1,5 +1,15 @@
 # @betteroffice/fonts-cjk
 
+## 1.0.0
+
+### Minor Changes
+
+- de8f092: The optional CJK add-on now ships compressed `.otf.zst` assets, decoded automatically by the font manager. `CJK_FONT_ASSET_URLS` keys and `BundledFontFace.file` use the packed filenames; custom asset hosts must serve them.
+
+### Patch Changes
+
+- e6d5c52: Package exports now carry a `default` condition next to `import`, so webpack consumers (`next build --webpack`, including editors loaded with `next/dynamic`) resolve every entry instead of failing with "Package path is not exported".
+
 ## 0.4.2
 
 ## 0.4.1
