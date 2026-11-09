@@ -3,7 +3,7 @@ workflow:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "northstar"
     - if: $CI_COMMIT_BRANCH == "northstar"
 
-stages: [image, build]
+stages: [build, image]
 
 default:
   tags: [northstar-group-runner]
@@ -59,3 +59,4 @@ build-ci-image:
         --cache-ttl=24h
   rules:
     - when: manual
+      allow_failure: true
