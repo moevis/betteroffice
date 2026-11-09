@@ -135,7 +135,7 @@ function noteHasBacklink(area: NoteRegion, noteId: number): boolean {
   );
 }
 
-/** Whether `buildMirrorPage(page)` holds a table header cell, which cells on other pages may name. */
+/** Whether `buildMirrorPage(page)` may hold a table header cell, which cells on other pages may name; a cell marked as a header with nothing to read reads as a plain cell. */
 export function mirrorPageHasHeaderCells(page: DisplayPage): boolean {
   return pageRegionPrimitives(page).some((p) => p.cell?.isHeader === true);
 }
@@ -297,7 +297,8 @@ export function reduceMirrorToText(mirror: HTMLElement): HTMLElement {
       const accessible = object || Boolean(element.getAttribute('aria-label'));
       if (element.children.length === 0) {
         if (element.textContent && !object) {
-          element.replaceWith(plainRun(element, element.textContent));
+          const marker = element.classList.contains(MIRROR_CLASS_NAMES.listMarker);
+          element.replaceWith(plainRun(element, marker ? `${element.textContent.trimEnd()} ` : element.textContent));
         } else if (!accessible) {
           element.remove();
         }
@@ -806,7 +807,7 @@ interface BlockGroup {
   el: HTMLElement;
   prims: Exclude<DisplayPrimitive, { kind: 'line' }>[];
   table?: DisplayTableMetadata;
-  cells?: Array<{ el: HTMLElement; bounds?: GeoRect }>;
+  cells?: Array<{ el: HTMLElement; bounds?: GeoRect; headerRole?: 'columnheader' | 'rowheader' }>;
 }
 
 // shared body/region flow: primitives sharing a blockId group under one
@@ -986,7 +987,7 @@ function populateBlock(
       const cell = cells.get(colIndex)!;
       const cellEl = doc.createElement('div');
       cellEl.className = MIRROR_CLASS_NAMES.tableCell;
-      cellEl.setAttribute('role', cell.ref.isHeader ? 'columnheader' : 'cell');
+      cellEl.setAttribute('role', 'cell');
       cellEl.setAttribute('aria-colindex', String(colIndex + 1));
       if (cell.ref.cellId) cellEl.id = cell.ref.cellId;
       if (cell.ref.headerIds?.length) {
@@ -1037,12 +1038,10 @@ function populateBlock(
         populateParagraphBlock(paragraphEl, blockPrims, doc, offsetY, ctx);
         cellEl.appendChild(paragraphEl);
       }
-      if (!cell.ref.isHeader && cell.ref.isRowHeader && /[^\s\u200b\ufeff]/u.test(cellEl.textContent ?? '')) {
-        cellEl.setAttribute('role', 'rowheader');
-      }
       stampDocRangeFromDescendants(cellEl, cell.prims);
       applyContainerLanguageAndDirection(cellEl, cell.prims);
-      group.cells.push({ el: cellEl, bounds: boundsOfPrimitives(cell.prims) });
+      const headerRole = cell.ref.isHeader ? 'columnheader' : cell.ref.isRowHeader ? 'rowheader' : undefined;
+      group.cells.push({ el: cellEl, bounds: boundsOfPrimitives(cell.prims), headerRole });
       rowEl.appendChild(cellEl);
     }
   }
@@ -1099,6 +1098,21 @@ function chartTable(data: ChartData, doc: Document): HTMLElement | null {
   return table;
 }
 
+/** Whether `node` holds anything assistive technology can read: text, or a named object such as a picture. */
+function mirrorHasName(node: Node): boolean {
+  for (const child of Array.from(node.childNodes)) {
+    if (child.nodeType === 3) {
+      if (/[^\s\u200b\ufeff]/u.test(child.nodeValue ?? '')) return true;
+      continue;
+    }
+    if (child.nodeType !== 1) continue;
+    const element = child as Element;
+    if (element.getAttribute('aria-hidden') === 'true' || element.hasAttribute('inert')) continue;
+    if (element.getAttribute('aria-label')?.trim() || mirrorHasName(element)) return true;
+  }
+  return false;
+}
+
 /** Populate one paragraph-like block without re-interpreting table metadata. */
 function populateParagraphBlock(
   el: HTMLElement,
@@ -1117,7 +1131,7 @@ function populateParagraphBlock(
   for (const p of inLogicalOrder(prims)) {
     const child = renderMirrorPrimitive(p, doc, offsetY, ctx);
     const textRun = p.kind === 'glyphRun' || p.kind === 'text';
-    if (textRun && open && joinTextRunElement(open, child)) continue;
+    if (textRun && open && (joinTextRunElement(open, child) || joinNumberedMarker(open, child))) continue;
     el.appendChild(child);
     if (textRun) open = child;
     else if (p.kind !== 'decoration' && p.kind !== 'rect') open = null;
@@ -1161,26 +1175,8 @@ function isEmptyChartData(data: ChartData): boolean {
 const JOIN_IGNORED_ATTRIBUTES = new Set(['data-doc-start', 'data-doc-end', 'data-logical-order', 'style']);
 const JOIN_IGNORED_STYLES = new Set(['left', 'width']);
 
-/** One document position per UTF-16 unit, which a field result showing more text than it occupies does not have. */
-function coversItsText(run: HTMLElement, text: Text): boolean {
-  return Number(run.dataset.docEnd) - Number(run.dataset.docStart) === text.length;
-}
-
-/**
- * Appends text run `next` to the touching run `open` on the same line when
- * nothing else tells them apart, so a line shaped cluster by cluster reads as
- * one text node: screen readers otherwise hear each positioned cluster as its
- * own word. Returns false, touching nothing, when they differ.
- */
-function joinTextRunElement(open: HTMLElement, next: HTMLElement): boolean {
-  if (open.tagName !== next.tagName || open.id || next.id) return false;
-  const openText = open.firstChild;
-  const nextText = next.firstChild;
-  if (open.childNodes.length !== 1 || next.childNodes.length !== 1) return false;
-  if (openText?.nodeType !== 3 || nextText?.nodeType !== 3) return false;
-  const end = open.dataset.docEnd;
-  if (end === undefined || end !== next.dataset.docStart || next.dataset.docEnd === undefined) return false;
-  if (!coversItsText(open, openText as Text) || !coversItsText(next, nextText as Text)) return false;
+/** Whether `next` touches `open` on its line and nothing else tells them apart; widens `open` to cover both if so. */
+function joinTouchingBox(open: HTMLElement, next: HTMLElement): boolean {
   const openLeft = parseFloat(open.style.left);
   const openRight = openLeft + parseFloat(open.style.width);
   const nextLeft = parseFloat(next.style.left);
@@ -1203,6 +1199,40 @@ function joinTextRunElement(open: HTMLElement, next: HTMLElement): boolean {
   const left = Math.min(openLeft, nextLeft);
   open.style.left = `${left}px`;
   open.style.width = `${Math.max(openRight, nextRight) - left}px`;
+  return true;
+}
+
+/** Reads a number shaped run by run, such as "3", ".", "2", as one number. */
+function joinNumberedMarker(open: HTMLElement, next: HTMLElement): boolean {
+  const numbered = (run: HTMLElement) =>
+    run.classList.contains(MIRROR_CLASS_NAMES.listMarker) && !run.hasAttribute('aria-hidden');
+  if (!numbered(open) || !numbered(next) || open.tagName !== next.tagName) return false;
+  if (!joinTouchingBox(open, next)) return false;
+  open.textContent = `${open.textContent ?? ''}${next.textContent ?? ''}`;
+  return true;
+}
+
+/** One document position per UTF-16 unit, which a field result showing more text than it occupies does not have. */
+function coversItsText(run: HTMLElement, text: Text): boolean {
+  return Number(run.dataset.docEnd) - Number(run.dataset.docStart) === text.length;
+}
+
+/**
+ * Appends text run `next` to the touching run `open` on the same line when
+ * nothing else tells them apart, so a line shaped cluster by cluster reads as
+ * one text node: screen readers otherwise hear each positioned cluster as its
+ * own word. Returns false, touching nothing, when they differ.
+ */
+function joinTextRunElement(open: HTMLElement, next: HTMLElement): boolean {
+  if (open.tagName !== next.tagName || open.id || next.id) return false;
+  const openText = open.firstChild;
+  const nextText = next.firstChild;
+  if (open.childNodes.length !== 1 || next.childNodes.length !== 1) return false;
+  if (openText?.nodeType !== 3 || nextText?.nodeType !== 3) return false;
+  const end = open.dataset.docEnd;
+  if (end === undefined || end !== next.dataset.docStart || next.dataset.docEnd === undefined) return false;
+  if (!coversItsText(open, openText as Text) || !coversItsText(next, nextText as Text)) return false;
+  if (!joinTouchingBox(open, next)) return false;
   (openText as Text).appendData((nextText as Text).data);
   open.dataset.docEnd = next.dataset.docEnd;
   return true;
@@ -1297,6 +1327,12 @@ function nestTableBlocks(blocks: Map<number | string, BlockGroup>): void {
     candidates.sort((a, b) => rectArea(a.bounds!) - rectArea(b.bounds!));
     candidates[0]?.el.appendChild(group.el);
   }
+  // A header needs something to read, which a table nested in it can supply.
+  for (const group of blocks.values()) {
+    for (const cell of group.cells ?? []) {
+      if (cell.headerRole && mirrorHasName(cell.el)) cell.el.setAttribute('role', cell.headerRole);
+    }
+  }
 }
 
 function pointInRect(x: number, y: number, rect: GeoRect): boolean {
@@ -1359,10 +1395,13 @@ function inLogicalOrder<T extends BlockGroup['prims']>(prims: T): T {
   return prims.map((p) => (p.logicalOrder === undefined ? p : ordered[index++])) as T;
 }
 
-function applyListMarker(el: HTMLElement, p: { listMarker?: boolean; listMarkerRevision?: 'ins' | 'del' }): void {
+function applyListMarker(
+  el: HTMLElement,
+  p: { listMarker?: boolean; listMarkerNumbered?: boolean; listMarkerRevision?: 'ins' | 'del' }
+): void {
   if (!p.listMarker) return;
   el.classList.add(MIRROR_CLASS_NAMES.listMarker);
-  el.setAttribute('aria-hidden', 'true');
+  if (!p.listMarkerNumbered) el.setAttribute('aria-hidden', 'true');
   if (p.listMarkerRevision) {
     el.style.color = p.listMarkerRevision === 'ins' ? 'rgb(46, 125, 50)' : 'rgb(198, 40, 40)';
   }
