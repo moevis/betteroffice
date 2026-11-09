@@ -1,4 +1,2 @@
-# GitLab runner 访问不了 GitHub；yrs 的 patch 指向上游 GitHub，
-# 这里把 fetch 地址改写到内网 mirror。
-[url."https://gitlab.basemind.com/northstar/y-crdt"]
-    insteadOf = "https://github.com/openooxml/y-crdt"
+[net]
+git-fetch-with-cli = true
