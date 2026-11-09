@@ -17,3 +17,5 @@ build-ci-image:
         --cache-run-layers=false \
         --cache-dir=/tmp/cache \
         --cache-ttl=24h
+  rules:
+    - when: manual
