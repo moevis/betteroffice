@@ -31,6 +31,7 @@ ARG WASM_BINDGEN_VERSION=0.2.129
 ENV DEBIAN_FRONTEND=noninteractive \
     CARGO_HOME=/usr/local/cargo \
     RUSTUP_HOME=/usr/local/rustup \
+    RUSTUP_DIST_SERVER=https://mirrors.ustc.edu.cn/rust-static \
     PATH=/usr/local/cargo/bin:${PATH}
 
 # Debian 12 的 deb822 sources 与旧式 sources.list 都替换成内网可达的镜像。
