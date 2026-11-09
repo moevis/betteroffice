@@ -1,8 +1,50 @@
-stages: [image]
+workflow:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "northstar"
+    - if: $CI_COMMIT_BRANCH == "northstar"
+
+stages: [build, image]
+
+default:
+  tags: [northstar-group-runner]
+  image: hub.stepfun-inc.com/northstar/betteroffice-ci:v1
+  interruptible: true
+
+variables:
+  BUN_INSTALL_CACHE_DIR: "$CI_PROJECT_DIR/.cache/bun"
+  CARGO_INCREMENTAL: "0"
+  CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+
+build:
+  stage: build
+  timeout: 90m
+  cache:
+    - key:
+        files: [bun.lock]
+        prefix: bun
+      paths: [.cache/bun/]
+    - key: wasm-$CI_COMMIT_REF_SLUG
+      paths: [target/wasm-pack/]
+  script:
+    - 'git config --global url."https://gitlab.basemind.com/northstar/y-crdt.git".insteadOf "https://github.com/openooxml/y-crdt.git"'
+    - bun install --frozen-lockfile
+    - bun run build:packages
+    - bunx napi build --cwd bindings/docx-native --platform --release -- --locked
+    - bunx napi build --cwd bindings/pptx-native --platform --release -- --locked
+    - bunx napi build --cwd bindings/xlsx-native --platform --release -- --locked
+  artifacts:
+    paths:
+      - packages/*/dist/
+      - packages/*/package.json
+      - bindings/*/dist/
+      - bindings/*/*.node
+      - bindings/*/index.js
+      - bindings/*/index.d.ts
+      - bindings/*/package.json
+    expire_in: 3 days
 
 build-ci-image:
   stage: image
-  tags: [northstar-group-runner]
   timeout: 90m
   image:
     name: catalyst-cn-shanghai.cr.volces.com/devops/stepbase-kaniko:latest
@@ -19,3 +61,4 @@ build-ci-image:
         --cache-ttl=24h
   rules:
     - when: manual
+      allow_failure: true
