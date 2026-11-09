@@ -1,0 +1,96 @@
+# BetterOffice CI 工具链镜像。
+#
+# Repository: northstar/betteroffice-ci
+# Tag:        v1
+#
+# 构建与推送（linux/amd64）：
+#   docker build --platform=linux/amd64 \
+#     -f Dockerfile.ci \
+#     -t hub.stepfun-inc.com/northstar/betteroffice-ci:v1 .
+#   docker push hub.stepfun-inc.com/northstar/betteroffice-ci:v1
+#
+# 内容：Node 24 + npm 11、Bun 1.4.3、Rust stable + wasm32 target、
+# wasm-pack 0.15.0、wasm-bindgen-cli 0.2.129、binaryen 132（wasm-opt）、
+# @napi-rs/cli 3.10.8，以及 native 构建所需的 gcc/make/cmake。
+#
+# GitLab runner 访问不了 GitHub，而 wasm-pack 默认会从 GitHub 下载
+# wasm-bindgen/wasm-opt。这里提前把两者装进 PATH，wasm-pack 会直接复用：
+#   - wasm-bindgen-cli 版本必须与 Cargo.lock 的 wasm-bindgen 一致
+#   - binaryen npm 包提供 wasm-opt 132，与上游 CI 固定的 version_132 一致
+
+ARG BASE_IMAGE=artifactory.stepfun-inc.com/docker-public/node:24-bookworm
+FROM ${BASE_IMAGE}
+
+ARG APT_MIRROR=https://mirrors.ustc.edu.cn
+ARG BUN_VERSION=1.4.3
+ARG BINARYEN_VERSION=132.0.0
+ARG NAPI_VERSION=3.10.8
+ARG WASM_PACK_VERSION=0.15.0
+ARG WASM_BINDGEN_VERSION=0.2.129
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    CARGO_HOME=/usr/local/cargo \
+    RUSTUP_HOME=/usr/local/rustup \
+    PATH=/usr/local/cargo/bin:${PATH}
+
+# Debian 12 的 deb822 sources 与旧式 sources.list 都替换成内网可达的镜像。
+RUN if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
+      sed -i \
+        -e "s|http://deb.debian.org/debian-security|${APT_MIRROR}/debian-security|g" \
+        -e "s|http://deb.debian.org/debian|${APT_MIRROR}/debian|g" \
+        /etc/apt/sources.list.d/debian.sources; \
+    fi \
+ && if [ -f /etc/apt/sources.list ]; then \
+      sed -i \
+        -e "s|http://deb.debian.org/debian-security|${APT_MIRROR}/debian-security|g" \
+        -e "s|http://deb.debian.org/debian|${APT_MIRROR}/debian|g" \
+        /etc/apt/sources.list; \
+    fi \
+ && apt-get update \
+ && apt-get install -y --no-install-recommends \
+      build-essential \
+      ca-certificates \
+      cmake \
+      curl \
+      git \
+      jq \
+      pkg-config \
+      python3 \
+      xz-utils \
+ && rm -rf /var/lib/apt/lists/*
+
+# rustup 安装到 /usr/local，避免依赖运行用户 HOME；同时装 wasm32 target。
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+      | sh -s -- -y --profile minimal --default-toolchain stable \
+ && rustup target add wasm32-unknown-unknown \
+ && rustc --version \
+ && cargo --version
+
+# Bun 从 npm 安装（registry.npmjs.org 在 runner 上可达）；GitHub 不通，不能用
+# bun.sh 安装脚本。binaryen 提供 wasm-opt，@napi-rs/cli 提供 napi 命令。
+RUN npm install -g \
+      bun@${BUN_VERSION} \
+      binaryen@${BINARYEN_VERSION} \
+      @napi-rs/cli@${NAPI_VERSION} \
+ && bun --version \
+ && wasm-opt --version
+
+# wasm-pack 与 wasm-bindgen 都从 crates.io 编译安装。
+# 保留 registry/cache（CI 首次构建直接复用），删掉解压后的 src 控制体积。
+RUN cargo install wasm-pack --version ${WASM_PACK_VERSION} --locked \
+ && cargo install wasm-bindgen-cli --version ${WASM_BINDGEN_VERSION} --locked \
+ && rm -rf "${CARGO_HOME}/registry/src"
+
+# 构建期自检：版本不匹配时让镜像构建直接失败，避免 CI 到运行期才发现。
+RUN node --version \
+ && npm --version \
+ && bun --version \
+ && rustc --version \
+ && cargo --version \
+ && rustup target list --installed | grep -qx wasm32-unknown-unknown \
+ && wasm-pack --version | grep -qx "wasm-pack ${WASM_PACK_VERSION}" \
+ && wasm-bindgen --version | grep -qx "wasm-bindgen ${WASM_BINDGEN_VERSION}" \
+ && wasm-opt --version | grep -q "version_132" \
+ && napi --version
+
+WORKDIR /builds

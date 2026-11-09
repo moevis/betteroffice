@@ -1,0 +1,19 @@
+stages: [image]
+
+build-ci-image:
+  stage: image
+  tags: [northstar-group-runner]
+  timeout: 90m
+  image:
+    name: catalyst-cn-shanghai.cr.volces.com/devops/stepbase-kaniko:latest
+    entrypoint: [""]
+  script:
+    - |
+      /kaniko/executor \
+        --context "${CI_PROJECT_DIR}" \
+        --dockerfile "${CI_PROJECT_DIR}/Dockerfile.ci" \
+        --destination "catalyst-cn-shanghai.cr.volces.com/busi/northstar/betteroffice-ci:v1" \
+        --cache=true \
+        --cache-run-layers=false \
+        --cache-dir=/tmp/cache \
+        --cache-ttl=24h
