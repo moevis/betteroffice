@@ -77,6 +77,16 @@ RUN npm install -g \
  && bun --version \
  && wasm-opt --version
 
+# 国内 crates 镜像；同时加速本镜像里的 cargo install。
+RUN mkdir -p "${CARGO_HOME}" \
+ && printf '%s\n' \
+      '[source.crates-io]' \
+      'replace-with = "ustc"' \
+      '' \
+      '[source.ustc]' \
+      'registry = "sparse+https://mirrors.ustc.edu.cn/crates.io-index/"' \
+      > "${CARGO_HOME}/config.toml"
+
 # wasm-pack 与 wasm-bindgen 都从 crates.io 编译安装。
 # 保留 registry/cache（CI 首次构建直接复用），删掉解压后的 src 控制体积。
 RUN cargo install wasm-pack --version ${WASM_PACK_VERSION} --locked \
