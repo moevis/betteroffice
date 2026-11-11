@@ -1,3 +1,4 @@
+import { usePluginGestures } from '../../../shared/plugin-host/usePluginGestures';
 import { commandReason } from './commands/evaluate';
 import {
   anchorSelection, clearedCells, copiedRange, mergeAnchorCell, selectionDataRequest, selectionHidden, selectionMerges,
@@ -110,7 +111,7 @@ import { WorkbookFailure } from './components/WorkbookFailure';
 
 import type { XlsxEditorApi, XlsxInThreadEditorProps, XlsxPointPosition } from './XlsxEditor.types';
 import { XlsxSaveRefusedError } from './XlsxSaveRefusedError';
-import { A11yGridCell } from './components/A11yGridCell';
+import { A11yGridTable } from './components/A11yGridCell';
 
 function readOnlyRefusal(handle: WorkbookHandle): XlsxEditRefusal {
   return {
@@ -431,7 +432,7 @@ export function XlsxEditorContent({
   shortcuts,
   onShortcutIssue,
 }: Omit<XlsxInThreadEditorProps, 'file'> & { file?: Uint8Array }) {
-  const { t } = useTranslation();
+  const { t, lang } = useTranslation();
   const collaborationEnabled = collaboration !== undefined;
   const collaborationClientId = collaboration?.clientId;
   const collaborationInitialUpdate = collaboration?.initialUpdate;
@@ -451,6 +452,7 @@ export function XlsxEditorContent({
   const rafRef = useRef<number | null>(null);
   const [cellClipboard] = useState(() => new CellClipboard());
   const rootRef = useRef<HTMLDivElement>(null);
+  usePluginGestures(rootRef);
   const editorInputRef = useRef<HTMLInputElement>(null);
   const formulaInputRef = useRef<HTMLInputElement>(null);
   const draggingRef = useRef(false);
@@ -858,7 +860,7 @@ export function XlsxEditorContent({
       chartId: selectedChart?.id ?? null,
     };
   }, [sheetInfo, activeSheet, selection, selectedChart]);
-  const pluginHost = useXlsxPluginHost({
+  const pluginHost = useXlsxPluginHost({ locale: lang, focusRoot: scrollRef,
     plugins,
     pluginGrants,
     onPluginError,
@@ -867,6 +869,15 @@ export function XlsxEditorContent({
     readOnly,
     handle: openedHandle,
     selection: pluginSelection,
+    selectionPaintReady: (sheet) => {
+      const mark = { generation: generationRef.current, mutation: mutationRef.current,
+        view: `${sheet}:${zoomRef.current}` };
+      const previous = paintMarkRef.current;
+      const pending = sheet === activeSheetRef.current &&
+        (rafRef.current !== null || !previous || !covers(previous, mark));
+      return () => !pending || (paintMarkRef.current !== previous &&
+        paintMarkRef.current !== null && covers(paintMarkRef.current, mark));
+    },
     proposals,
     staleFor,
     proposalsPending: () => coordinator.pending,
@@ -1232,6 +1243,12 @@ export function XlsxEditorContent({
     try {
       version = handle ? handle.version() : null;
     } catch {}
+    const painted: PaintMark = {
+      generation: generationRef.current,
+      mutation: mutationRef.current,
+      view: `${activeSheet}:${zoom}`,
+    };
+    paintMarkRef.current = painted;
     const sheetId = sheetInfoRef.current?.sheetIds[activeSheet];
     presentGrid(
       version !== null && sheetId !== undefined
@@ -1243,12 +1260,6 @@ export function XlsxEditorContent({
     mergedRangesRef.current = { sheet: activeSheet, ranges: nextMergedRanges };
     setFrame(dl);
     if (!handle) return;
-    const painted: PaintMark = {
-      generation: generationRef.current,
-      mutation: mutationRef.current,
-      view: `${activeSheet}:${zoom}`,
-    };
-    paintMarkRef.current = painted;
     const waiters = paintWaitersRef.current;
     paintWaitersRef.current = waiters.filter((waiter) => !covers(painted, waiter.mark));
     for (const waiter of waiters) if (covers(painted, waiter.mark)) waiter.resolve(true);
@@ -2777,24 +2788,7 @@ export function XlsxEditorContent({
 
       {a11yGrid && (
         <>
-          <div style={visuallyHidden} role="grid" aria-label={a11yGrid.label}>
-            <div role="row">
-              <span role="columnheader" />
-              {a11yGrid.columnHeaders.map((h) => (
-                <span key={h.col} role="columnheader">
-                  {h.label}
-                </span>
-              ))}
-            </div>
-            {a11yGrid.rows.map((r) => (
-              <div key={r.row} role="row">
-                <span role="rowheader">{r.header}</span>
-                {r.cells.map((c) => (
-                  <A11yGridCell key={c.col} cell={c} onFollowLink={followLinkFromMirror} />
-                ))}
-              </div>
-            ))}
-          </div>
+          <A11yGridTable grid={a11yGrid} style={visuallyHidden} onFollowLink={followLinkFromMirror} />
           {a11yGrid.charts.map((chart, index) => (
             <div key={`${index}:${chart.label}`} style={visuallyHidden} role="img" aria-label={chart.label} />
           ))}

@@ -3,6 +3,8 @@ pub(crate) mod batch;
 mod chart_cache_tests;
 pub mod charts;
 #[cfg(test)]
+mod deferred_authority_tests;
+#[cfg(test)]
 mod edit_tests;
 #[cfg(test)]
 mod format_calculation_tests;
@@ -32,7 +34,7 @@ use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::ops::{Range, RangeInclusive};
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::sync::{Arc, Mutex, Weak};
+use std::sync::{Arc, Mutex, OnceLock, Weak};
 
 use ooxml_drawingml::chart::ChartSpace;
 use serde::{Deserialize, Serialize};
@@ -72,7 +74,7 @@ use xlsx_render::{
 #[cfg(feature = "raster")]
 use crate::RenderedPng;
 use crate::authority::{
-    AuthorityError, FILTER_DATABASE_NAME, HistoryUpdate, MAX_STATE_VECTOR_ENTRIES,
+    AuthorityError, FILTER_DATABASE_NAME, HistoryUpdate, LocalHistory, MAX_STATE_VECTOR_ENTRIES,
     SnapshotAdoption, StagedLocalUpdate, StagedUpdate, SyncOrigin, WorkbookAuthority,
     WorkbookStructure, is_collaborative_local_layout_op, is_structural_op,
     validate_hyperlink_edit_baseline,
@@ -459,7 +461,7 @@ pub struct Workbook {
     pub(crate) font_manager: betteroffice_fonts::FontManager,
     #[cfg(all(feature = "fonts", feature = "raster"))]
     pub(crate) fonts: Mutex<crate::font::FontRegistry>,
-    authority: WorkbookAuthority,
+    authority: AuthoritySlot,
     mode: WorkbookMode,
     pending_remote_updates: Vec<Vec<u8>>,
     model: WorkbookModel,
@@ -498,6 +500,128 @@ pub struct Workbook {
     chart_cache: Mutex<ChartCache>,
     /// SHA-256 of retained source parts that exports have cited.
     source_part_hashes: Mutex<BTreeMap<String, String>>,
+}
+
+/// A standalone workbook opened from a package builds its authority the first time something
+/// needs it, from the model that package parsed and the readings an open would have used.
+struct AuthoritySlot {
+    built: OnceLock<WorkbookAuthority>,
+    deferred: Option<Box<DeferredAuthority>>,
+}
+
+struct DeferredAuthority {
+    legacy_dimensions: Vec<xlsx_parse::LegacySheetDimensions>,
+    legacy_styles: Option<Stylesheet>,
+    /// Committed changes the authority has not seen, replayed in order when it is built.
+    changes: Vec<DeferredChange>,
+    styles: Option<Arc<Stylesheet>>,
+}
+
+/// A change committed while the authority was deferred, with what staging it would have taken.
+enum DeferredChange {
+    Commit {
+        ops: Vec<Op>,
+        origin: SyncOrigin,
+        styles: Arc<Stylesheet>,
+        history: LocalHistory,
+    },
+    Apply {
+        ops: Vec<Op>,
+        origin: SyncOrigin,
+        styles: Arc<Stylesheet>,
+    },
+}
+
+impl DeferredAuthority {
+    fn shared_styles(&mut self, styles: &Stylesheet) -> Arc<Stylesheet> {
+        match &self.styles {
+            Some(last) if last.same_state(styles) => Arc::clone(last),
+            _ => {
+                let styles = Arc::new(styles.clone());
+                self.styles = Some(Arc::clone(&styles));
+                styles
+            }
+        }
+    }
+
+    /// Stages each change exactly as the commit that made it would have.
+    fn replay(&self, authority: &mut WorkbookAuthority) -> Result<()> {
+        for change in &self.changes {
+            match change {
+                DeferredChange::Commit {
+                    ops,
+                    origin,
+                    styles,
+                    history,
+                } => {
+                    if let Some(sync) = authority.prepare_range_format_sync(ops, *origin) {
+                        authority
+                            .commit_range_format_sync(sync, *history)
+                            .map_err(authority_error)?;
+                    } else {
+                        let staged = authority
+                            .stage_standalone_ops_v1(ops, *origin, styles, None)
+                            .map_err(authority_error)?;
+                        authority
+                            .adopt_local_update(staged, *history)
+                            .map_err(authority_error)?;
+                    }
+                }
+                DeferredChange::Apply {
+                    ops,
+                    origin,
+                    styles,
+                } => {
+                    authority
+                        .apply_ops_with_update(ops, *origin, styles, false)
+                        .map_err(authority_error)?;
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+impl AuthoritySlot {
+    fn built(authority: WorkbookAuthority) -> Self {
+        Self {
+            built: OnceLock::from(authority),
+            deferred: None,
+        }
+    }
+
+    fn get(&self) -> Result<&WorkbookAuthority> {
+        self.built.get().ok_or_else(missing_authority)
+    }
+
+    fn get_mut(&mut self) -> Result<&mut WorkbookAuthority> {
+        self.built.get_mut().ok_or_else(missing_authority)
+    }
+
+    fn has_pending_updates(&self) -> bool {
+        self.built
+            .get()
+            .is_some_and(WorkbookAuthority::has_pending_updates)
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    pub(crate) static EAGER_AUTHORITY: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+#[cfg(test)]
+fn eager_authority() -> bool {
+    EAGER_AUTHORITY.get()
+}
+
+#[cfg(not(test))]
+fn eager_authority() -> bool {
+    false
+}
+
+fn missing_authority() -> Error {
+    Error::CollaborativeState("the workbook's authority was not built".into())
 }
 
 #[derive(Default)]
@@ -708,7 +832,7 @@ impl Workbook {
         }
         let parsed = xlsx_parse::parse_workbook_with_owned_package(parts)?;
         xlsx_model::open_timing! { drop(timing_parse); }
-        let mut workbook = Self::from_source(
+        let mut workbook = Self::from_source_deferring(
             parsed.workbook,
             Some(parsed.package),
             parsed.active_sheet,
@@ -716,6 +840,7 @@ impl Workbook {
             client_id,
             &parsed.legacy_dimensions,
             (parsed.legacy_styles.as_ref(), &[]),
+            client_id.is_none() && !eager_authority(),
         )?;
         workbook.source_container = Some(ooxml_opc::SourceContainer::new(bytes.to_vec()));
         Ok(workbook)
@@ -799,6 +924,31 @@ impl Workbook {
         legacy_dimensions: &[xlsx_parse::LegacySheetDimensions],
         legacy_styles: (Option<&Stylesheet>, &[Stylesheet]),
     ) -> Result<Self> {
+        Self::from_source_deferring(
+            model,
+            source_package,
+            active_sheet,
+            build_graph,
+            client_id,
+            legacy_dimensions,
+            legacy_styles,
+            false,
+        )
+    }
+
+    /// `defer` leaves the authority to be built from `source_package`'s parsed model, which
+    /// must be `model`.
+    #[allow(clippy::too_many_arguments)]
+    fn from_source_deferring(
+        model: WorkbookModel,
+        source_package: Option<xlsx_parse::PreservedPackage>,
+        active_sheet: SheetId,
+        build_graph: bool,
+        client_id: Option<u64>,
+        legacy_dimensions: &[xlsx_parse::LegacySheetDimensions],
+        legacy_styles: (Option<&Stylesheet>, &[Stylesheet]),
+        defer: bool,
+    ) -> Result<Self> {
         validate_model(&model)?;
         validate_chart_source(&model, source_package.is_some())?;
         let active_sheet = if (active_sheet.0 as usize) < model.sheets.len() {
@@ -809,28 +959,44 @@ impl Workbook {
         if let Some(client_id) = client_id {
             validate_collaboration_client_id(client_id)?;
         }
-        let (authority, mut projected, structure) = WorkbookAuthority::from_source_with_projection(
-            &model,
-            client_id,
-            legacy_dimensions,
-            legacy_styles.0,
-            legacy_styles.1,
-        )
-        .map_err(authority_error)?;
-        if client_id.is_some() {
-            validate_collaboration_size(&authority.encode_state_as_update_v1())?;
-            validate_collaboration_state_entries(authority.state_vector_entries())?;
-            xlsx_model::progress::pulse();
-        }
-        retain_array_formulas(&model, &mut projected);
-        if client_id.is_none() {
-            for (source, target) in model.sheets.iter().zip(&mut projected.sheets) {
-                target.hidden_col_widths = source.hidden_col_widths.clone();
-                target.hidden_row_heights = source.hidden_row_heights.clone();
+        let deferred =
+            defer && client_id.is_none() && source_package.is_some() && legacy_styles.1.is_empty();
+        let (authority, model, structure) = if deferred {
+            let slot = AuthoritySlot {
+                built: OnceLock::new(),
+                deferred: Some(Box::new(DeferredAuthority {
+                    legacy_dimensions: legacy_dimensions.to_vec(),
+                    legacy_styles: legacy_styles.0.cloned(),
+                    changes: Vec::new(),
+                    styles: None,
+                })),
+            };
+            (slot, model, None)
+        } else {
+            let (authority, mut projected, structure) =
+                WorkbookAuthority::from_source_with_projection(
+                    &model,
+                    client_id,
+                    legacy_dimensions,
+                    legacy_styles.0,
+                    legacy_styles.1,
+                )
+                .map_err(authority_error)?;
+            if client_id.is_some() {
+                validate_collaboration_size(&authority.encode_state_as_update_v1())?;
+                validate_collaboration_state_entries(authority.state_vector_entries())?;
+                xlsx_model::progress::pulse();
             }
-        }
-        let model = projected;
-        validate_model(&model)?;
+            retain_array_formulas(&model, &mut projected);
+            if client_id.is_none() {
+                for (source, target) in model.sheets.iter().zip(&mut projected.sheets) {
+                    target.hidden_col_widths = source.hidden_col_widths.clone();
+                    target.hidden_row_heights = source.hidden_row_heights.clone();
+                }
+            }
+            validate_model(&projected)?;
+            (AuthoritySlot::built(authority), projected, Some(structure))
+        };
         let opened_anchors = model.sheets.iter().flat_map(|sheet| &sheet.charts).fold(
             BTreeMap::new(),
             |mut anchors, chart| {
@@ -839,11 +1005,11 @@ impl Workbook {
             },
         );
         let graph = build_graph.then(|| DepGraph::build(&model));
-        let mode = match client_id {
-            Some(_) => WorkbookMode::Collaborative {
+        let mode = match (client_id, structure) {
+            (Some(_), Some(structure)) => WorkbookMode::Collaborative {
                 structure: Box::new(structure),
             },
-            None => WorkbookMode::Standalone,
+            _ => WorkbookMode::Standalone,
         };
         let preserved = match &source_package {
             Some(package) => PreservedSheetState {
@@ -921,8 +1087,73 @@ impl Workbook {
         }
     }
 
+    /// # Panics
+    ///
+    /// When a standalone workbook's deferred authority cannot be built; see
+    /// [`Workbook::try_client_id`].
     pub fn client_id(&self) -> u64 {
-        self.authority.client_id()
+        self.built_authority().client_id()
+    }
+
+    pub fn try_client_id(&self) -> Result<u64> {
+        Ok(self.authority()?.client_id())
+    }
+
+    /// The authority, built from the opened package the first time anything needs it.
+    fn authority(&self) -> Result<&WorkbookAuthority> {
+        if let Some(authority) = self.authority.built.get() {
+            return Ok(authority);
+        }
+        let (Some(deferred), Some(package)) = (&self.authority.deferred, &self.source_package)
+        else {
+            return Err(missing_authority());
+        };
+        let (mut authority, _, _) = WorkbookAuthority::from_source_with_projection(
+            package.materialize()?.original_workbook(),
+            None,
+            &deferred.legacy_dimensions,
+            deferred.legacy_styles.as_ref(),
+            &[],
+        )
+        .map_err(authority_error)?;
+        deferred.replay(&mut authority)?;
+        Ok(self.authority.built.get_or_init(|| authority))
+    }
+
+    /// Whether a standalone commit leaves the authority unbuilt and logs the change instead:
+    /// only while nothing observes the updates the authority would encode.
+    fn defers_staging(&self) -> bool {
+        self.authority.built.get().is_none()
+            && self.authority.deferred.is_some()
+            && !self.has_update_consumers()
+    }
+
+    fn defer_apply(&mut self, ops: &[Op], origin: SyncOrigin) -> Result<()> {
+        let deferred = self
+            .authority
+            .deferred
+            .as_deref_mut()
+            .ok_or_else(missing_authority)?;
+        let styles = deferred.shared_styles(&self.model.styles);
+        deferred.changes.push(DeferredChange::Apply {
+            ops: ops.to_vec(),
+            origin,
+            styles,
+        });
+        Ok(())
+    }
+
+    fn ensure_authority(&mut self) -> Result<()> {
+        self.authority()?;
+        self.authority.deferred = None;
+        Ok(())
+    }
+
+    fn built_authority(&self) -> &WorkbookAuthority {
+        match self.authority() {
+            Ok(authority) => authority,
+            Err(error) => panic!("{error}"),
+        }
     }
 
     /// The session-scoped token of the committed document state. Every committed change,
@@ -962,18 +1193,32 @@ impl Workbook {
         !self.pending_remote_updates.is_empty() || self.authority.has_pending_updates()
     }
 
+    /// # Panics
+    ///
+    /// As [`Workbook::client_id`]; see [`Workbook::try_encode_state_vector_v1`].
     pub fn encode_state_vector_v1(&self) -> Vec<u8> {
-        self.authority.encode_state_vector_v1()
+        self.built_authority().encode_state_vector_v1()
     }
 
+    pub fn try_encode_state_vector_v1(&self) -> Result<Vec<u8>> {
+        Ok(self.authority()?.encode_state_vector_v1())
+    }
+
+    /// # Panics
+    ///
+    /// As [`Workbook::client_id`]; see [`Workbook::try_encode_state_as_update_v1`].
     pub fn encode_state_as_update_v1(&self) -> Vec<u8> {
-        self.authority.encode_state_as_update_v1()
+        self.built_authority().encode_state_as_update_v1()
+    }
+
+    pub fn try_encode_state_as_update_v1(&self) -> Result<Vec<u8>> {
+        Ok(self.authority()?.encode_state_as_update_v1())
     }
 
     pub fn encode_diff_v1(&self, remote_state_vector: &[u8]) -> Result<Vec<u8>> {
         validate_collaboration_size(remote_state_vector)?;
         let update = self
-            .authority
+            .authority()?
             .encode_diff_v1(remote_state_vector)
             .map_err(authority_error)?;
         validate_collaboration_size(&update)?;
@@ -1001,7 +1246,7 @@ impl Workbook {
         if self.restore_snapshot(update, options)? {
             return Ok(self.remote_mutation_result(&before, true));
         }
-        if self.authority.seeds_another_bootstrap(update) {
+        if self.authority()?.seeds_another_bootstrap(update) {
             return Err(Error::CollaborativeStructureChanged);
         }
         let staged = self.stage_remote_updates(&[update], None, &structure)?;
@@ -1037,20 +1282,23 @@ impl Workbook {
             return Ok(false);
         };
         let frozen = frozen.clone();
-        let candidate = match self
-            .authority
-            .snapshot_replacement_with_legacy_styles(update, || {
-                self.source_package
-                    .as_ref()?
-                    .materialize()
-                    .ok()?
-                    .legacy_style_readings()
-                    .ok()
-            }) {
-            SnapshotAdoption::NotApplicable => return Ok(false),
-            SnapshotAdoption::Incompatible(error) => return Err(Error::CollaborativeState(error)),
-            SnapshotAdoption::Replacement(candidate) => *candidate,
-        };
+        let candidate =
+            match self
+                .authority()?
+                .snapshot_replacement_with_legacy_styles(update, || {
+                    self.source_package
+                        .as_ref()?
+                        .materialize()
+                        .ok()?
+                        .legacy_style_readings()
+                        .ok()
+                }) {
+                SnapshotAdoption::NotApplicable => return Ok(false),
+                SnapshotAdoption::Incompatible(error) => {
+                    return Err(Error::CollaborativeState(error));
+                }
+                SnapshotAdoption::Replacement(candidate) => *candidate,
+            };
         let structure = candidate.structure().map_err(authority_error)?;
         if !structure.describes_same_workbook(&frozen)
             && !frozen.allows_snapshot_transition(&structure)
@@ -1074,7 +1322,7 @@ impl Workbook {
         );
         let mut calculation = calculation_result(&recalc);
         calculation.changed = changed_cells_between(&self.model, &model);
-        self.authority = candidate;
+        self.authority = AuthoritySlot::built(candidate);
         self.preserved.resize(frozen.sheet_keys.len());
         self.install_model(model)?;
         self.rebase_sheet_positions(&frozen.sheet_keys, &structure.sheet_keys);
@@ -1090,7 +1338,7 @@ impl Workbook {
         self.preserved_redo.clear();
         self.preserved.forget_shared_strings();
         self.preserved.forget_axes();
-        self.authority.clear_history();
+        self.authority.get_mut()?.clear_history();
         self.proposals.clear();
         self.edited_since_open = true;
         self.version_nonce = batch::mint_nonce();
@@ -1110,7 +1358,7 @@ impl Workbook {
         frozen: &WorkbookStructure,
     ) -> Result<StagedUpdate> {
         let staged = self
-            .authority
+            .authority()?
             .stage_updates_v1(updates, baseline)
             .map_err(authority_error)?;
         validate_collaboration_state(staged.state_bytes, staged.state_vector_entries)?;
@@ -1151,7 +1399,7 @@ impl Workbook {
         staged: &WorkbookModel,
         dormant: &[DefinedName],
     ) -> Result<()> {
-        let source = self.authority.source_defined_names();
+        let source = self.authority()?.source_defined_names();
         if staged.defined_names == source && dormant.is_empty() {
             return Ok(());
         }
@@ -1210,7 +1458,7 @@ impl Workbook {
             let Some(filter) = &sheet.auto_filter else {
                 continue;
             };
-            if self.authority.source_auto_filter(index) == Some(filter) {
+            if self.authority()?.source_auto_filter(index) == Some(filter) {
                 continue;
             }
             if staged
@@ -1266,7 +1514,10 @@ impl Workbook {
             let update = self.pending_remote_updates[index].clone();
             let staged = self.stage_remote_updates(
                 &[&update],
-                Some(baseline.get_or_insert_with(|| self.authority.encode_state_as_update_v1())),
+                Some(
+                    baseline
+                        .get_or_insert_with(|| self.built_authority().encode_state_as_update_v1()),
+                ),
                 structure,
             );
             match staged {
@@ -1341,6 +1592,7 @@ impl Workbook {
         let mut calculation = calculation_result(&recalc);
         calculation.changed = changed_cells_between(&self.model, &model);
         self.authority
+            .get_mut()?
             .apply_staged_update_v1(&commit_update)
             .map_err(authority_error)?;
         self.install_model(model)?;
@@ -1356,7 +1608,7 @@ impl Workbook {
         self.preserved_redo.clear();
         self.preserved.forget_shared_strings();
         self.preserved.forget_axes();
-        self.authority.clear_history();
+        self.authority.get_mut()?.clear_history();
         self.edited_since_open = true;
         self.committed_changes += 1;
         self.emit_update(UpdateEvent {
@@ -1517,6 +1769,7 @@ impl Workbook {
 
     #[cfg(test)]
     pub(crate) fn defer_source_package_for_test(&mut self) -> Result<()> {
+        self.ensure_authority()?;
         let source = self
             .source_container
             .as_ref()
@@ -2286,6 +2539,8 @@ impl Workbook {
         }
         let mut preview = self.model.clone();
         let mut origins = self.preserved.origins.clone();
+        let mut axes = self.preserved.axes.clone();
+        let mut drawings_move = false;
         let mut names = self.sheet_names();
         let defined = DefinedFunctionNames::new(&preview.defined_names);
         let mut batch = xlsx_ops::InPlaceBatch::new(&mut preview);
@@ -2301,17 +2556,45 @@ impl Workbook {
                 self.ensure_worksheet_sheet_in(staged, &origins, sheet)?;
             }
             self.ensure_references_stay_valid(&names, op)?;
+            drawings_move |= self.ensure_drawings_follow(&origins, &axes, op)?;
             validate_op(staged, op)?;
             validate_insert_capacity(staged, op)?;
             batch.apply(op)?;
             match *op {
-                Op::AddSheet { index, .. } => origins.insert(index, None),
+                Op::AddSheet { index, .. } => {
+                    origins.insert(index, None);
+                    axes.insert(index.min(axes.len()), None);
+                }
                 Op::RemoveSheet { index } => {
                     origins.remove(index);
+                    if index < axes.len() {
+                        axes.remove(index);
+                    }
                 }
                 Op::MoveSheet { from, to } => {
                     let origin = origins.remove(from);
                     origins.insert(to, origin);
+                    if from < axes.len() {
+                        let moved = axes.remove(from);
+                        axes.insert(to.min(axes.len()), moved);
+                    }
+                }
+                Op::InsertRows { sheet, at, count }
+                | Op::DeleteRows { sheet, at, count }
+                | Op::InsertCols { sheet, at, count }
+                | Op::DeleteCols { sheet, at, count } => {
+                    if let Some(Some(sheet_axes)) = axes.get_mut(sheet.0 as usize) {
+                        let map = if matches!(op, Op::InsertRows { .. } | Op::DeleteRows { .. }) {
+                            &mut sheet_axes.rows
+                        } else {
+                            &mut sheet_axes.cols
+                        };
+                        if matches!(op, Op::InsertRows { .. } | Op::InsertCols { .. }) {
+                            map.insert(at, count);
+                        } else {
+                            map.delete(at, count);
+                        }
+                    }
                 }
                 _ => {}
             }
@@ -2333,7 +2616,7 @@ impl Workbook {
         let proposals_changed = self
             .rebased_proposals(&ops)
             .is_some_and(|proposals| proposals != self.proposals.list());
-        if preview == self.model && !proposals_changed {
+        if preview == self.model && !proposals_changed && !drawings_move {
             return Ok(MutationResult::default());
         }
         mark(EditStage::Validated);
@@ -2403,7 +2686,7 @@ impl Workbook {
 
     pub fn can_undo(&self) -> bool {
         if self.is_collaborative() {
-            self.authority.can_undo()
+            self.built_authority().can_undo()
         } else {
             self.undo.can_undo()
         }
@@ -2411,7 +2694,7 @@ impl Workbook {
 
     pub fn can_redo(&self) -> bool {
         if self.is_collaborative() {
-            self.authority.can_redo()
+            self.built_authority().can_redo()
         } else {
             self.undo.can_redo()
         }
@@ -2419,11 +2702,12 @@ impl Workbook {
 
     pub fn history_state(&self) -> HistoryState {
         if self.is_collaborative() {
+            let authority = self.built_authority();
             return HistoryState {
-                can_undo: self.authority.can_undo(),
-                can_redo: self.authority.can_redo(),
-                undo_depth: self.authority.undo_depth(),
-                redo_depth: self.authority.redo_depth(),
+                can_undo: authority.can_undo(),
+                can_redo: authority.can_redo(),
+                undo_depth: authority.undo_depth(),
+                redo_depth: authority.redo_depth(),
             };
         }
         HistoryState {
@@ -2447,15 +2731,17 @@ impl Workbook {
         let reached = reached_sheets(&ops);
         let before = (scope != CalculationScope::Full)
             .then(|| CalculationInputs::of(&self.model, &reached).into_owned());
-        let update = self
-            .authority
-            .apply_ops_with_update(
-                &ops,
-                SyncOrigin::Undo,
-                &self.model.styles,
-                self.has_update_consumers(),
-            )
-            .map_err(authority_error)?;
+        let update = if self.defers_staging() {
+            self.defer_apply(&ops, SyncOrigin::Undo)?;
+            None
+        } else {
+            let consumers = self.has_update_consumers();
+            self.ensure_authority()?;
+            self.authority
+                .get_mut()?
+                .apply_ops_with_update(&ops, SyncOrigin::Undo, &self.model.styles, consumers)
+                .map_err(authority_error)?
+        };
         let prior_styles = self.pre_edit_cell_styles(&ops);
         let delta = self.geometry_delta(&ops);
         let rebased = self.rebased_proposals(&ops);
@@ -2509,15 +2795,17 @@ impl Workbook {
         let reached = reached_sheets(&ops);
         let before = (scope != CalculationScope::Full)
             .then(|| CalculationInputs::of(&self.model, &reached).into_owned());
-        let update = self
-            .authority
-            .apply_ops_with_update(
-                &ops,
-                SyncOrigin::Redo,
-                &self.model.styles,
-                self.has_update_consumers(),
-            )
-            .map_err(authority_error)?;
+        let update = if self.defers_staging() {
+            self.defer_apply(&ops, SyncOrigin::Redo)?;
+            None
+        } else {
+            let consumers = self.has_update_consumers();
+            self.ensure_authority()?;
+            self.authority
+                .get_mut()?
+                .apply_ops_with_update(&ops, SyncOrigin::Redo, &self.model.styles, consumers)
+                .map_err(authority_error)?
+        };
         let prior_styles = self.pre_edit_cell_styles(&ops);
         let delta = self.geometry_delta(&ops);
         let rebased = self.rebased_proposals(&ops);
@@ -2572,11 +2860,12 @@ impl Workbook {
         options: CalculationOptions,
         redo: bool,
     ) -> Result<MutationResult> {
-        let checkpoint = self.authority.checkpoint();
+        let authority = self.authority.get_mut()?;
+        let checkpoint = authority.checkpoint();
         let stepped = if redo {
-            self.authority.redo()
+            authority.redo()
         } else {
-            self.authority.undo()
+            authority.undo()
         };
         let outcome = match stepped {
             Ok(history) => self.apply_collaborative_history(history, options),
@@ -2587,6 +2876,7 @@ impl Workbook {
             Ok(result) => Ok(result),
             Err(error) => {
                 self.authority
+                    .get_mut()?
                     .restore(checkpoint)
                     .map_err(authority_error)?;
                 Err(error)
@@ -3054,6 +3344,17 @@ impl Workbook {
         target: crate::PngTarget,
         options: &RenderOptions,
     ) -> Result<RenderedPng> {
+        self.render_png_with_faces(target, options, None)
+    }
+
+    /// [`Self::render_png`]. `Some` paints with those faces alone, for this export only; `None` resolves bundled faces.
+    #[cfg(feature = "raster")]
+    pub fn render_png_with_faces(
+        &self,
+        target: crate::PngTarget,
+        options: &RenderOptions,
+        faces: Option<&[crate::PngFontFace<'_>]>,
+    ) -> Result<RenderedPng> {
         if !(options.scale.is_finite() && options.scale > 0.0) {
             return Err(Error::InvalidScale(options.scale));
         }
@@ -3077,21 +3378,23 @@ impl Workbook {
                 } else {
                     scaled(display_list, options.scale)
                 };
-                self.rasterize_display_list(&display_list, width, height)
+                self.rasterize_display_list(&display_list, width, height, faces)
             }
-            crate::PngTarget::Range { sheet, range } => self.render_sheet(
+            crate::PngTarget::Range { sheet, range } => self.render_sheet_with_faces(
                 sheet,
                 &RenderOptions {
                     range: Some(range),
                     ..options.clone()
                 },
+                faces,
             ),
-            crate::PngTarget::UsedRange { sheet } => self.render_sheet(
+            crate::PngTarget::UsedRange { sheet } => self.render_sheet_with_faces(
                 sheet,
                 &RenderOptions {
                     range: None,
                     ..options.clone()
                 },
+                faces,
             ),
         }
     }
@@ -3102,15 +3405,29 @@ impl Workbook {
         display_list: &DisplayList,
         width: u32,
         height: u32,
+        faces: Option<&[crate::PngFontFace<'_>]>,
     ) -> Result<RenderedPng> {
         #[cfg(feature = "fonts")]
-        let bytes = {
-            let fonts = self.raster_fonts(display_list)?;
-            xlsx_raster::render_png_with_fonts(display_list, fonts.fonts())
-                .map_err(Error::Raster)?
-        };
+        let bytes = match faces {
+            Some(faces) => xlsx_raster::render_png_with_fonts(
+                display_list,
+                &crate::font::supplied_fonts(display_list, faces)?,
+            ),
+            None => {
+                let fonts = self.raster_fonts(display_list)?;
+                xlsx_raster::render_png_with_fonts(display_list, fonts.fonts())
+            }
+        }
+        .map_err(Error::Raster)?;
         #[cfg(not(feature = "fonts"))]
-        let bytes = xlsx_raster::render_png(display_list).map_err(Error::Raster)?;
+        let bytes = {
+            if let Some(face) = faces.and_then(<[_]>::first) {
+                return Err(Error::FontUnavailable {
+                    family: face.family.to_owned(),
+                });
+            }
+            xlsx_raster::render_png(display_list).map_err(Error::Raster)?
+        };
         Ok(RenderedPng {
             bytes,
             width,
@@ -3136,8 +3453,19 @@ impl Workbook {
 
     #[cfg(feature = "raster")]
     pub fn render_sheet(&self, sheet: SheetId, options: &RenderOptions) -> Result<RenderedPng> {
+        self.render_sheet_with_faces(sheet, options, None)
+    }
+
+    /// [`Self::render_sheet`], with `faces` as in [`Self::render_png_with_faces`].
+    #[cfg(feature = "raster")]
+    pub fn render_sheet_with_faces(
+        &self,
+        sheet: SheetId,
+        options: &RenderOptions,
+        faces: Option<&[crate::PngFontFace<'_>]>,
+    ) -> Result<RenderedPng> {
         let (display_list, width, height) = self.range_png_display_list_for(sheet, options)?;
-        self.rasterize_display_list(&display_list, width, height)
+        self.rasterize_display_list(&display_list, width, height, faces)
     }
 
     #[doc(hidden)]
@@ -3289,6 +3617,56 @@ impl Workbook {
         }
     }
 
+    /// Refuses a row or column edit that would leave a picture or shape of the sheet's source
+    /// drawing where a save cannot place it, with the sheet's rows and columns where `axes` puts
+    /// them at this op of the batch, and says whether one moves. A drawing two current sheets
+    /// share, through a copied sheet, cannot move for one of them alone.
+    fn ensure_drawings_follow(
+        &self,
+        origins: &[Option<usize>],
+        axes: &[Option<xlsx_parse::SheetAxes>],
+        op: &Op,
+    ) -> Result<bool> {
+        let (sheet, rows, at, count, inserting) = match *op {
+            Op::InsertRows { sheet, at, count } => (sheet, true, at, count, true),
+            Op::DeleteRows { sheet, at, count } => (sheet, true, at, count, false),
+            Op::InsertCols { sheet, at, count } => (sheet, false, at, count, true),
+            Op::DeleteCols { sheet, at, count } => (sheet, false, at, count, false),
+            _ => return Ok(false),
+        };
+        let (Some(Some(origin)), Some(slot)) =
+            (origins.get(sheet.0 as usize), self.source_package.as_ref())
+        else {
+            return Ok(false);
+        };
+        let shift = xlsx_parse::GridShift {
+            rows,
+            at,
+            count,
+            inserting,
+        };
+        if !slot.sheet_may_hold_drawing(*origin) {
+            return Ok(false);
+        }
+        let package = slot.materialize()?;
+        let sheet_axes = axes.get(sheet.0 as usize).and_then(Option::as_ref);
+        let copied = origins
+            .iter()
+            .filter(|other| **other == Some(*origin))
+            .count()
+            > 1;
+        let refused = |part: &str| {
+            Error::InvalidOperation(format!(
+                "{part} references cells this edit would move, and it cannot be rewritten"
+            ))
+        };
+        match package.drawings_after_shift(*origin, sheet_axes, shift) {
+            Err(part) => Err(refused(part)),
+            Ok(true) if copied => Err(refused(package.drawing_part(*origin).unwrap_or_default())),
+            Ok(moves) => Ok(moves),
+        }
+    }
+
     fn sheet_names(&self) -> Vec<String> {
         self.model
             .sheets
@@ -3359,6 +3737,7 @@ impl Workbook {
             let staged = self.stage_local_update(ops, SyncOrigin::User)?;
             let new_structure = staged.structure.clone();
             self.authority
+                .get_mut()?
                 .apply_local_update_v1(&staged.update, SyncOrigin::User)
                 .map_err(authority_error)?;
             let mut model = staged.model;
@@ -3371,15 +3750,17 @@ impl Workbook {
             self.update_sheet_info_cache(ops, &prior_styles);
             Some(staged.update)
         } else {
-            let update = self
-                .authority
-                .apply_ops_with_update(
-                    ops,
-                    SyncOrigin::User,
-                    &self.model.styles,
-                    self.has_update_consumers(),
-                )
-                .map_err(authority_error)?;
+            let update = if self.defers_staging() {
+                self.defer_apply(ops, SyncOrigin::User)?;
+                None
+            } else {
+                let consumers = self.has_update_consumers();
+                self.ensure_authority()?;
+                self.authority
+                    .get_mut()?
+                    .apply_ops_with_update(ops, SyncOrigin::User, &self.model.styles, consumers)
+                    .map_err(authority_error)?
+            };
             let transaction = Transaction::new(ops.to_vec(), Provenance::User);
             self.apply_model_history(|undo, model| undo.commit(model, &transaction))?;
             self.bump_model_epoch();
@@ -3436,7 +3817,7 @@ impl Workbook {
             WorkbookMode::Standalone => return Err(Error::NotCollaborative),
         };
         let staged = self
-            .authority
+            .authority()?
             .stage_local_ops_v1(ops, origin, &self.model.styles)
             .map_err(authority_error)?;
         if !structure.allows_transition(&staged.structure) {
@@ -3575,6 +3956,7 @@ impl Workbook {
                 Op::SetCharts { .. }
                 | Op::SetChartAnchor { .. }
                 | Op::SetDefinedNames { .. }
+                | Op::SetTables { .. }
                 | Op::AddConditionalFormat { .. }
                 | Op::RemoveConditionalFormat { .. }
                 | Op::SetConditionalFormats { .. }
@@ -4461,6 +4843,7 @@ fn worksheet_edit_target(op: &Op) -> Option<SheetId> {
         | Op::RenameSheet { .. }
         | Op::RestoreSheet { .. }
         | Op::SetDefinedNames { .. }
+        | Op::SetTables { .. }
         | Op::SetDefinedName { .. }
         | Op::DeleteDefinedName { .. } => None,
     }
@@ -4711,6 +5094,7 @@ fn validate_op(model: &WorkbookModel, op: &Op) -> Result<()> {
         Op::SetDefinedName { .. } | Op::DeleteDefinedName { .. } => {}
         Op::RestoreSheet { .. }
         | Op::SetDefinedNames { .. }
+        | Op::SetTables { .. }
         | Op::SetCharts { .. }
         | Op::SetConditionalFormats { .. }
         | Op::RestoreAutoFilter { .. }
@@ -4734,10 +5118,6 @@ fn validate_insert_capacity(model: &WorkbookModel, op: &Op) -> Result<()> {
             let loses_cells = sheet
                 .iter_cells()
                 .any(|(cell, _)| cell.row >= at && cell.row >= cutoff);
-            let loses_heights = sheet
-                .row_heights
-                .keys()
-                .any(|&row| row >= at && row >= cutoff);
             let loses_merges = sheet
                 .merges
                 .iter()
@@ -4746,7 +5126,7 @@ fn validate_insert_capacity(model: &WorkbookModel, op: &Op) -> Result<()> {
                 .hyperlinks
                 .iter()
                 .any(|link| link.range.end.row >= at && link.range.end.row >= cutoff);
-            if loses_cells || loses_heights || loses_merges || loses_hyperlinks {
+            if loses_cells || loses_merges || loses_hyperlinks {
                 return Err(Error::InvalidOperation(
                     "row insertion would discard content at the sheet boundary".to_string(),
                 ));
@@ -4761,10 +5141,6 @@ fn validate_insert_capacity(model: &WorkbookModel, op: &Op) -> Result<()> {
             let loses_cells = sheet
                 .iter_cells()
                 .any(|(cell, _)| cell.col >= at && cell.col >= cutoff);
-            let loses_widths = sheet
-                .col_widths
-                .keys()
-                .any(|&col| col >= at && col >= cutoff);
             let loses_merges = sheet
                 .merges
                 .iter()
@@ -4773,7 +5149,7 @@ fn validate_insert_capacity(model: &WorkbookModel, op: &Op) -> Result<()> {
                 .hyperlinks
                 .iter()
                 .any(|link| link.range.end.col >= at && link.range.end.col >= cutoff);
-            if loses_cells || loses_widths || loses_merges || loses_hyperlinks {
+            if loses_cells || loses_merges || loses_hyperlinks {
                 return Err(Error::InvalidOperation(
                     "column insertion would discard content at the sheet boundary".to_string(),
                 ));
@@ -5846,6 +6222,7 @@ impl CalculationScope {
             | Op::SetRowVisibility { .. }
             | Op::RestoreRowDimension { .. } => Self::Full,
             Op::SetDefinedNames { .. }
+            | Op::SetTables { .. }
             | Op::SetDefinedName { .. }
             | Op::DeleteDefinedName { .. }
             | Op::AddSheet { .. }
@@ -6156,7 +6533,7 @@ impl Workbook {
         };
         let version_nonce = batch::mint_nonce();
         Ok(Self {
-            authority,
+            authority: AuthoritySlot::built(authority),
             mode,
             pending_remote_updates: Vec::new(),
             model,
@@ -6231,8 +6608,8 @@ mod tests {
                     }
                     (WorkbookMode::Standalone, WorkbookMode::Standalone) => {
                         assert_eq!(
-                            actual.authority.structure().unwrap(),
-                            expected.authority.structure_oracle().unwrap(),
+                            actual.authority_for_test().structure().unwrap(),
+                            expected.authority_for_test().structure_oracle().unwrap(),
                             "{label}"
                         );
                     }
@@ -6903,3 +7280,30 @@ mod tests {
 
 #[cfg(test)]
 mod geometry_tests;
+
+#[cfg(test)]
+impl Workbook {
+    pub(crate) fn authority_for_test(&self) -> &WorkbookAuthority {
+        self.authority().unwrap()
+    }
+
+    pub(crate) fn authority_mut_for_test(&mut self) -> &mut WorkbookAuthority {
+        self.ensure_authority().unwrap();
+        self.authority.get_mut().unwrap()
+    }
+
+    pub(crate) fn set_authority_for_test(&mut self, authority: WorkbookAuthority) {
+        self.authority = AuthoritySlot::built(authority);
+    }
+
+    pub(crate) fn authority_is_built_for_test(&self) -> bool {
+        self.authority.built.get().is_some()
+    }
+
+    pub(crate) fn deferred_changes_for_test(&self) -> usize {
+        self.authority
+            .deferred
+            .as_ref()
+            .map_or(0, |deferred| deferred.changes.len())
+    }
+}

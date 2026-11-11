@@ -1146,6 +1146,8 @@ export type { XlsxDefinedNameOp, XlsxDefinedName, XlsxDefinedNamesRequest, XlsxD
 export type { ChartInfo, ChartSeriesInfo, ChartEdit, ChartMutation, ChartSeriesName } from './charts';
 export { fontPackDiagnostics } from './fontPackDiagnostics';
 export type { FontPackDiagnostic } from './fontPackDiagnostics';
+export { fontPreflight, preloadPreflightWasm } from './wasm/preflight';
+export type { FontPreflight, FontPreflightFace } from './wasm/preflight';
 
 // ---- render/canvas2d.d.ts ----
 /**
@@ -1694,6 +1696,7 @@ export {};
 
 // ---- session/methods.d.ts ----
 import type { FontDecoderMethods } from '../../../../shared/office-session/fontDecoder';
+import type { FontCdnConfiguration } from '../../../../shared/office-session/fontCdn';
 import type { SaveWarning } from '../../../../shared/office-session/saveWarnings';
 import type { XlsxDefinedNamesRequest, XlsxDefinedNamesResult } from '../definedNames';
 import type { PipeOutputBatch } from '../../../../shared/collaboration-pipe/protocol';
@@ -1765,6 +1768,8 @@ export type WorkbookWireFrame = Omit<WorkbookFrame, 'displayList'> & {
  */
 export interface WorkbookSessionOpenOptions extends OpenWorkbookOptions {
     wasm?: ArrayBuffer | WebAssembly.Module;
+    /** @internal */
+    fontCdn?: FontCdnConfiguration;
     png?: boolean;
     initialViewport?: WorkbookInitialPaintRequest;
     includeEditState?: boolean;
@@ -1839,7 +1844,7 @@ export interface WorkbookSessionEvents {
 export type WorkbookSessionMethods = FontDecoderMethods & {
     open(bytes: ArrayBuffer, options?: WorkbookSessionOpenOptions): WorkbookSessionOpenReply;
     /** Checkpoints are only restorable by the same engine version and codec. */
-    openRecovery(checkpoint: Checkpoint, options?: Pick<WorkbookSessionOpenOptions, 'wasm' | 'png'>): WorkbookSessionOpenReply;
+    openRecovery(checkpoint: Checkpoint, options?: Pick<WorkbookSessionOpenOptions, 'wasm' | 'png' | 'fontCdn'>): WorkbookSessionOpenReply;
     version(): string;
     collaborationStateVector(): Uint8Array;
     collaborationStateAsUpdate(remoteStateVector?: Uint8Array): Uint8Array;
@@ -2615,6 +2620,7 @@ export type CommandAck<S, E, F> = {
     version: number;
     outcomes: CommandOutcome[];
     selection?: S;
+    cause?: 'remote';
     editState?: E;
     frame?: FrameEnvelope<F>;
     revisions?: {
@@ -2692,6 +2698,7 @@ export type EditSessionState<S, E> = {
     throughSeq: number;
     presentedThroughSeq: number;
     selection: S | undefined;
+    selectionCause?: 'remote';
     editState: E | undefined;
 };
 /** @internal Shared asynchronous editor contract for worker and legacy backends. */
@@ -2935,6 +2942,17 @@ export declare function isCommandAck(value: unknown): value is CommandAck<unknow
 /** @internal Identifies the unknown-outcome reply error and its preserved sequence. */
 export declare function isCommandOutcomeUnknownError(value: unknown): value is CommandOutcomeUnknownError;
 
+// ---- shared/office-session/fontCdn.d.ts ----
+/** @internal */
+export interface FontCdnConfiguration {
+    baseUrl: string | false;
+    timeoutMs: number;
+}
+/** @internal */
+export declare function getFontCdnConfiguration(): FontCdnConfiguration | undefined;
+/** @internal */
+export declare function setFontCdnConfiguration(configuration: FontCdnConfiguration | undefined): void;
+
 // ---- shared/office-session/fontDecoder.d.ts ----
 export type FontDecoder = (bytes: ArrayBuffer | Uint8Array, options: {
     codec: string;
@@ -2954,6 +2972,34 @@ export declare function copyDecodedFace(face: {
     font: Uint8Array;
     payload?: Uint8Array;
 }): FontDecodeResult;
+
+// ---- shared/office-session/fontPreflight.d.ts ----
+export type PreflightWasmInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
+/** @experimental */
+export interface FontPreflightFace {
+    family: string;
+    bold: boolean;
+    italic: boolean;
+    scripts: string[];
+}
+/** @experimental */
+export interface FontPreflight {
+    faces: FontPreflightFace[];
+    /** False when some font rules could not be resolved. */
+    complete: boolean;
+}
+/** @internal */
+export declare function createPreflightState(options: {
+    assetUrl: () => URL;
+    engineKind: 'wasm' | 'native';
+    initAsync: (input: {
+        module_or_path: PreflightWasmInput;
+    }) => Promise<unknown>;
+}): {
+    status(): "idle" | "loading" | "ready";
+    memory(): WebAssembly.Memory | undefined;
+    preload(input?: PreflightWasmInput): Promise<void>;
+};
 
 // ---- shared/office-session/host.d.ts ----
 import { type TaskExecutor } from './scheduler';
@@ -2990,6 +3036,22 @@ export type PngExportCode = 'canvas-unavailable' | 'canvas-too-large' | 'font-un
 export declare class PngExportError extends Error {
     readonly code: PngExportCode;
     constructor(code: PngExportCode, message: string);
+}
+/** Why a picture was left as a placeholder. */
+export type PngPictureUnavailableReason = 'missing' | 'unsupported' | 'decode-failed' | 'metafile' | 'too-large' | 'budget';
+/** A picture a PNG export drew as a placeholder. `limit` and `actual` say by how much a size or budget limit was passed. */
+export interface PngUnavailablePicture {
+    /** The engine's reference for the picture; empty for one whose relationship has no part, which has nothing to name it by. */
+    id: string;
+    reason: PngPictureUnavailableReason;
+    limit?: number;
+    actual?: number;
+    unit?: 'pixels' | 'bytes' | 'work';
+}
+/** A problem a PNG export worked around: the page still exports. */
+export interface PngDiagnostic {
+    code: 'picture-unavailable';
+    pictures: PngUnavailablePicture[];
 }
 
 // ---- shared/office-session/protocol.d.ts ----
@@ -4404,11 +4466,27 @@ export interface XlsxPngOptions {
      * Faces to paint the sheet's fonts with, matched by family and style. Each
      * export installs them under private names and drops them afterwards; one
      * that fails to load rejects with `PngExportError` `font-unavailable`. The
-     * editors pass the faces they paint with; without faces the export loads the
-     * bundled faces `@betteroffice/xlsx-native` draws the sheet's fonts with.
+     * editors pass the faces they paint with. Without this option the export
+     * loads the bundled faces `@betteroffice/xlsx-native` draws the sheet's fonts
+     * with, and rejects if one fails to load. A list, even an empty one, replaces
+     * them: a family it does not cover is painted with the engine's built-in
+     * substitute.
      */
     fonts?: ReadonlyArray<XlsxFontFace>;
 }
+
+// ---- wasm/preflight.d.ts ----
+import { type FontPreflight, type PreflightWasmInput } from '../../../../shared/office-session/fontPreflight';
+export type { FontPreflight, FontPreflightFace } from '../../../../shared/office-session/fontPreflight';
+export declare const preflightWasmState: {
+    status(): "idle" | "loading" | "ready";
+    memory(): WebAssembly.Memory | undefined;
+    preload(input?: PreflightWasmInput): Promise<void>;
+};
+/** @experimental Load the font preflight wasm on demand. Idempotent. */
+export declare function preloadPreflightWasm(input?: PreflightWasmInput): Promise<void>;
+/** @experimental Font faces for the active sheet's A1:T50 region, without opening the engine. */
+export declare function fontPreflight(bytes: Uint8Array): Promise<FontPreflight>;
 
 // ---- workerSession.d.ts ----
 /** @experimental */

@@ -86,6 +86,11 @@ import type { PeerlessPropertyIntent } from './inputEvents';
 import { useWorkerCollaboration } from './useWorkerCollaboration';
 import { geometryMatchesDocument, type PeerlessFrameGeometry, type PeerlessViewIdentity } from './viewStore';
 import { useTranslation } from '../../../i18n';
+import { resolvedLocale } from '../../../i18n/LocaleContext';
+import { visibleViewport } from '../../../plugins/geometry';
+import { createSelectionSettle } from '../../../../../../shared/plugin-host/selectionSettle';
+import { trackFocus } from '../../../../../../shared/plugin-host/focusTracker';
+import { subscribeSelectionActivity } from '../../../plugins/selectionIdentity';
 
 const PREVIEW_CUT = { blocks: 200, paragraphBudget: 256 };
 const SIDEBAR_EDGE = 16;
@@ -179,6 +184,11 @@ export const PeerlessDocxEditor = forwardRef<DocxEditorRef, DocxEditorProps>(fun
     if (!worker.current) return Promise.reject(new Error('The document worker is not ready'));
     return worker.current.documentRead(request);
   }, []);
+  const mirrorReadBlocked = useCallback(() => !worker.current || worker.current.frameRequestPending(false), []);
+  const readPageTexts = useCallback<import('./UnbuiltPageMirrors').ReadPageTexts>((pages, stamp) => {
+    if (mirrorReadBlocked()) return Promise.resolve(null);
+    return read({ kind: 'pageTexts', pages, expectFrameEpoch: stamp.frameEpoch, expectLayoutRevision: stamp.layoutRevision }).then((reply) => reply.value);
+  }, [read, mirrorReadBlocked]);
   const readAt = useCallback<ResidentEngineWorkerClient['documentReadAt']>((request, token) => {
     if (!worker.current) return Promise.reject(new Error('The document worker is not ready'));
     return worker.current.documentReadAt(request, token);
@@ -256,8 +266,8 @@ export const PeerlessDocxEditor = forwardRef<DocxEditorRef, DocxEditorProps>(fun
     navigation.scrollToBookmark(name).then(() => focus(), error => reportRecoverableError(error instanceof Error ? error : new Error(String(error))));
   };
   const inputCommand = useRef<ReturnType<typeof useWorkerContextMenu>['input']>(async () => ({ ok: false, failure: { code: 'editor-unavailable', message: '' } }));
-  useLayoutEffect(() => controller.update({ ...controllerOptions, imagePropertiesAvailable: propertyDialogs.imagePropertiesAvailable, image: propertyDialogs.imageState, onImageWrap: propertyDialogs.applyImageWrap, onImageTransform: propertyDialogs.applyImageTransform, search: search.host, pickImage: fileIO.pickImage, openSplitCell: propertyDialogs.openSplitCell, openTableProperties: propertyDialogs.openTableProperties, perform: async (id) => {
-    if (id === 'cut' || id === 'copy' || id === 'paste' || id === 'pasteAsPlainText' || id === 'selectAll') return inputCommand.current(id);
+  useLayoutEffect(() => controller.update({ ...controllerOptions, imagePropertiesAvailable: propertyDialogs.imagePropertiesAvailable, image: propertyDialogs.imageState, onImageWrap: propertyDialogs.applyImageWrap, onImageTransform: propertyDialogs.applyImageTransform, search: search.host, pickImage: fileIO.pickImage, openSplitCell: propertyDialogs.openSplitCell, openTableProperties: propertyDialogs.openTableProperties, perform: async (id, _args, clipboardText) => {
+    if (id === 'cut' || id === 'copy' || id === 'paste' || id === 'pasteAsPlainText' || id === 'selectAll') return inputCommand.current(id, clipboardText);
     if (id === 'pageSetup') return propertyDialogs.openPageSetup();
     if (id === 'paragraphSpacingDialog') return propertyDialogs.openParagraphSpacing();
     if (id === 'watermark') return propertyDialogs.openWatermark();
@@ -313,16 +323,33 @@ export const PeerlessDocxEditor = forwardRef<DocxEditorRef, DocxEditorProps>(fun
   const [geometryRevision, redrawGeometry] = useState(0);
   const sentReservationsRef = useRef<() => DocxReservationsPayload | null>(() => null);
   const [pluginGeometry] = useState(() => createWorkerPluginGeometry(controller, () => host.current, () => overlayRef.current, () => redrawGeometry(value => value + 1),
-    (target, focus, expectVersion) => navigation.revealParagraph(target.paraId, target.story, focus, expectVersion), () => sentReservationsRef.current()));
+    (target, focus, expectVersion) => navigation.revealParagraph(target.paraId, target.story, focus, expectVersion), () => sentReservationsRef.current(),
+    (overlay) => visibleViewport(scroller.current ?? overlay, container.current ?? overlay, overlay), () => pluginHost.flushSelection()));
   const [displayWindow, setDisplayWindow] = useState<readonly [number, number]>([0, 3]);
   const showWindow = useCallback((next: readonly [number, number]) =>
     setDisplayWindow((current) => current[0] === next[0] && current[1] === next[1] ? current : next), []);
   useLayoutEffect(() => { pluginGeometry.setDisplayWindow(displayWindow); }, [pluginGeometry, displayWindow]);
   const setPluginLayer = useCallback((element: HTMLDivElement | null) => { overlayRef.current = element; setOverlayLayer(element); }, []);
   const [pluginHost] = useState<DocxPluginHost>(() => createDocxPluginHost({
+    readSelection: () => {
+      const view = controller.getSnapshot().view;
+      const toolbar = view?.workerSelection ? view.editState?.toolbar : null;
+      pluginHost.layoutChanged(pluginGeometry.layout());
+      return { selection: {
+        formatting: toolbar ? yrsSelectionState({ context: toolbar, startParagraphIndex: -1, endParagraphIndex: -1 }) : null,
+        displayRange: view?.workerSelection ? pluginGeometry.displaySelection() : null,
+      }, identity: pluginGeometry.selectionIdentity(), owner: active.current?.binding.session ?? controller,
+      ready: pluginGeometry.selectionMapped() };
+    },
+    selectionCause: () => controller.getSnapshot().view?.selectionCause,
+    selectionPublished: (key) => settleRef.current?.notifySelectionChange(key),
     pagedEditorRef: { current: null }, writeMode: () => controller.environment().readOnly ? 'viewing' : controller.environment().mode,
     commands: () => controller.commands, layout: () => ({ queries: null, complete: false, failed: false }),
-    subscribeLayout: controller.subscribe, geometry: pluginGeometry.geometry, subscribeGeometry: pluginGeometry.subscribe, translate: (key) => controller.environment().translate(key),
+    subscribeLayout: controller.subscribe, geometry: pluginGeometry.geometry,
+    subscribeGeometry: listener => pluginGeometry.subscribe(() => {
+      pluginHost.markSelectionDirty('refresh');
+      listener();
+    }), translate: (key) => controller.environment().translate(key),
     workerRead: {
       version: async () => { const result = await controller.ref.readParagraphs({ view: 'accepted', paraIds: [] });
         return 'version' in result ? { ok: true, version: result.version } : result; },
@@ -335,6 +362,50 @@ export const PeerlessDocxEditor = forwardRef<DocxEditorRef, DocxEditorProps>(fun
     workerNavigation: pluginGeometry.navigation,
     workerRefusal: (error) => workerReadRefusal(controller, error),
   }));
+  const locale = resolvedLocale(props.i18n?._lang);
+  useLayoutEffect(() => { pluginHost.localeChanged(locale); }, [pluginHost, locale]);
+  const managedPlugins = Boolean(props.plugins?.length);
+  const settleRef = useRef<ReturnType<typeof createSelectionSettle> | null>(null);
+  const publishPluginSelection = useCallback(() => {
+    pluginHost.markSelectionDirty('refresh');
+  }, [pluginHost]);
+  useEffect(() => {
+    if (!managedPlugins || !documentReady) return;
+    let generation = pluginHost.generation();
+    const settled = (source: 'pointer' | 'touch' | 'keyboard') => pluginHost.selectionSettled(source, generation);
+    const machine = createSelectionSettle({
+      root: () => host.current?.querySelector('[data-docx-worker-editor]') ?? null,
+      restartOnTyping: false,
+      canSettle: () => {
+        const work = active.current?.binding.admission.getSnapshot();
+        if (!work || work.originalUnackedIntents || work.pendingInputs || work.heldIntents || work.compositionSlot !== null ||
+          !pluginGeometry.selectionMapped()) return false;
+        return true;
+      },
+      onUnsettle: () => { generation = pluginHost.generation(); pluginHost.selectionUnsettled(generation); },
+      onSettle: settled,
+      onResettle: settled,
+    });
+    settleRef.current = machine;
+    const session = active.current?.binding.session;
+    const unsubscribe = session ? subscribeSelectionActivity(session, () => publishPluginSelection()) : undefined;
+    let resolved = pluginGeometry.selectionIdentity().resolvedKey;
+    const unsubscribeView = controller.subscribe(() => {
+      const next = pluginGeometry.selectionIdentity().resolvedKey;
+      const moved = next !== resolved;
+      resolved = next;
+      pluginHost.markSelectionDirty(moved ? controller.getSnapshot().view?.selectionCause : 'refresh');
+    });
+    return () => { unsubscribe?.(); unsubscribeView(); machine.dispose(); settleRef.current = null; };
+  }, [controller, pluginHost, pluginGeometry, publishPluginSelection, managedPlugins, documentReady, shellState.view?.identity.session,
+    shellState.view?.identity.incarnation, shellState.view?.identity.epoch]);
+  useLayoutEffect(() => {
+    if (!managedPlugins) return;
+    return trackFocus(() => {
+      const surface = host.current?.querySelector('[data-docx-worker-editor]');
+      return surface ? [surface] : [];
+    }, (focused) => pluginHost.focusChanged(focused));
+  }, [pluginHost, managedPlugins]);
   const activations = useSyncExternalStore(pluginHost.subscribe, pluginHost.activations, pluginHost.activations);
   const reservations = usePluginReservations(pluginHost, activations);
   const reservationsRef = useRef<{ payload: DocxReservationsPayload | null; sent: boolean; source: DocxReservationsPayload | string | null;
@@ -369,13 +440,13 @@ export const PeerlessDocxEditor = forwardRef<DocxEditorRef, DocxEditorProps>(fun
       if (review) pluginHost.workerProposalsChanged(review.proposals);
       const layout = pluginGeometry.layout();
       pluginHost.layoutChanged(layout);
-      const toolbar = shellState.view?.editState?.toolbar;
       if (layout && pluginGeometry.geometry()) props.onRenderedDomContextReady?.(pluginGeometry.geometry()!.dom);
-      pluginHost.selectionChanged({ formatting: toolbar ? yrsSelectionState({ context: toolbar, startParagraphIndex: -1, endParagraphIndex: -1 }) : null, displayRange: pluginGeometry.displaySelection() });
+      publishPluginSelection();
       if (layout) pluginHost.geometryPresented(layout);
+      pluginHost.geometryChanged();
       pluginHost.syncCommands();
     } else { pluginHost.close('document-replaced'); setExpandedSidebarItem(null); }
-  }, [shellState, documentReady, pluginHost, props.mode, effectiveReadOnly, pluginGeometry, overlayLayer, geometryRevision, displayWindow]);
+  }, [shellState, documentReady, pluginHost, props.mode, effectiveReadOnly, pluginGeometry, publishPluginSelection, overlayLayer, geometryRevision, displayWindow]);
   const pluginSidebarItemCount = props.pluginSidebarItems?.length ?? 0;
   useLayoutEffect(() => { if (activations.length || pluginSidebarItemCount || props.onRenderedDomContextReady || props.showHostProposalsInSidebar) void pluginGeometry.update().catch(() => {}); },
     [shellState.view, zoom, overlayLayer, pluginGeometry, activations.length, pluginSidebarItemCount, props.onRenderedDomContextReady, props.showHostProposalsInSidebar]);
@@ -1396,7 +1467,7 @@ export const PeerlessDocxEditor = forwardRef<DocxEditorRef, DocxEditorProps>(fun
         <MirrorLinkRouteContext.Provider value={mirrorLinkRoute}><PeerlessPagedEditor sessionOptions={sessionOptions} zoom={zoom} onReady={onReady} autoFocus={!effectiveReadOnly}
           overlay={workerCollaboration.overlay(displayWindow)}
           displayWindow={displayWindow} onDisplayWindowChange={showWindow} onClipboard={onClipboard} onPasteFragment={onPasteFragment} highlights={searchState.highlights} onNavigateCell={controller.navigateCell} onPartPoint={onPartPoint} onDragSelectionChange={setDragSelecting} pictures={pictureMoves} tables={tableResize}
-          pageMirror={props.pageMirror} pageOverlays={<>{partChrome}<WorkerContentControls controller={controller} onError={reportRecoverableError} /></>} /></MirrorLinkRouteContext.Provider>
+          pageMirror={props.pageMirror} unbuiltPageMirror={props.unbuiltPageMirror} readPageTexts={readPageTexts} mirrorReadBlocked={mirrorReadBlocked} scrollToPage={navigation.scrollToPage} pageOverlays={<>{partChrome}<WorkerContentControls controller={controller} onError={reportRecoverableError} /></>} /></MirrorLinkRouteContext.Provider>
       ) : hasSource ? null : placeholder ?? <DefaultPlaceholder />}
     </div>} />
   </DocxCommandProvider>;

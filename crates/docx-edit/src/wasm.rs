@@ -115,6 +115,26 @@ impl From<EngineError> for JsValue {
                 );
                 value.into()
             }
+            EngineErrorKind::TableUnavailable => {
+                let value = js_sys::Error::new(&error.message);
+                value.set_name("TableUnavailableError");
+                let _ = js_sys::Reflect::set(
+                    &value,
+                    &JsValue::from_str("code"),
+                    &JsValue::from_str("table-unavailable"),
+                );
+                value.into()
+            }
+            EngineErrorKind::CellHasNoStory => {
+                let value = js_sys::Error::new(&error.message);
+                value.set_name("CellHasNoStoryError");
+                let _ = js_sys::Reflect::set(
+                    &value,
+                    &JsValue::from_str("code"),
+                    &JsValue::from_str("cell-has-no-story"),
+                );
+                value.into()
+            }
         }
     }
 }
@@ -521,6 +541,15 @@ impl EditSession {
             .map_err(JsValue::from)
     }
 
+    /// The text each of `pages` shows in the retained layout, built or not, as
+    /// `[{"pageIndex","paragraphs":[{"text","level"?,"inTable"?}]}]`: body
+    /// paragraphs cut where the page cuts them, headings with their zero-based
+    /// outline level, and the rows of tables the page places, cell by cell.
+    /// Header rows a table repeats on later pages read only once.
+    pub fn page_texts_json(&self, pages: Vec<u32>) -> Result<String, JsValue> {
+        self.core.page_texts_json(pages).map_err(JsValue::from)
+    }
+
     /// Release display pages; an empty result means the request was superseded.
     pub fn release_display_pages_frame(
         &self,
@@ -874,6 +903,13 @@ impl EditSession {
     /// when it seeded none.
     pub fn media_sources_json(&self) -> String {
         self.core.media_sources_json()
+    }
+
+    /// Adds to this replica's media sources every part of its own media table
+    /// they lack, so it resolves the `data:` URLs seeding wrote whether or not
+    /// it was seeded itself; `false` when nothing was added or it has no table.
+    pub fn rebuild_media_sources(&self) -> bool {
+        self.core.rebuild_media_sources()
     }
 
     /// Lays this replica's `data:` image sources out as the `media:{n}` tokens
@@ -2595,6 +2631,15 @@ impl EditSession {
         self.core.story_ids()
     }
 
+    /// `[{"story","tableIndex"}]` from a full walk of the roots in `roots_json`, or `null` when
+    /// a walk cannot finish.
+    /// @internal
+    pub fn unavailable_tables_from(&self, roots_json: &str) -> Result<String, JsValue> {
+        self.core
+            .unavailable_tables_from(roots_json)
+            .map_err(JsValue::from)
+    }
+
     /// Story length in UTF-16 units, every embed (pilcrows included) counting
     /// as one. Errors on an unknown story.
     pub fn story_len(&self, story: &str) -> Result<u32, JsValue> {
@@ -2638,9 +2683,13 @@ impl EditSession {
 
     /// Compact paragraph-position projection built in one story traversal:
     /// `[{"paraId","length"}, …]` in document order, where `length` counts the
-    /// UTF-16 text and inline embed units before that paragraph's pilcrow —
-    /// exactly the `offset` domain of a Loc in it. One call replaces crossing
-    /// the boundary once per paragraph. Errors on an unknown story.
+    /// UTF-16 text, inline embed units and one unit per block embed (table,
+    /// block content control) that leads the paragraph, before its pilcrow —
+    /// exactly the `offset` domain of a Loc in it. In a paragraph that follows
+    /// one table, offset 0 is before the table and the text starts at offset 1;
+    /// each further leading table or block content control adds one.
+    /// One call replaces crossing the boundary once per paragraph. Errors on an
+    /// unknown story.
     pub fn paragraph_spans(&self, story: &str) -> Result<String, JsValue> {
         self.core.paragraph_spans(story).map_err(JsValue::from)
     }

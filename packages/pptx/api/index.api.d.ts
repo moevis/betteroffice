@@ -506,6 +506,8 @@ export { openPresentationSession } from './session/client';
 export { createPptxWorkerEditorSession } from './session/editorSession';
 export { fontPackDiagnostics } from './fontPackDiagnostics';
 export type { FontPackDiagnostic } from './fontPackDiagnostics';
+export { fontPreflight, preloadPreflightWasm } from './wasm/preflight';
+export type { FontPreflight, FontPreflightFace } from './wasm/preflight';
 
 // ---- proposals.d.ts ----
 import type { DeckSnapshot, ParagraphAlignment, ShapeDraft, PresetShapeDraft, PictureDraft, ShapeFill, ShapeRect, ShapeSnapshot, ShapeStroke, SlideDisplayList, TextParagraphDraft, TextStyleSnapshot } from './types';
@@ -923,6 +925,7 @@ export declare function createPresentationEditorSession(bytes: Uint8Array | Arra
 
 // ---- session/methods.d.ts ----
 import type { MethodPolicies, SessionState } from '../../../../shared/office-session';
+import type { FontCdnConfiguration } from '../../../../shared/office-session/fontCdn';
 import type { PptxEditRequest, PptxEditResult, PptxFindRequest, PptxFindResult, PptxReadRequest, PptxReadResult, PptxValidationResult } from '../edits';
 import type { SlideDisplayList } from '../types';
 import type { OpenPresentationOptions } from '../wasm/loader';
@@ -963,6 +966,8 @@ export interface PresentationSessionOpenOptions extends Omit<OpenPresentationOpt
     fonts?: readonly PresentationSessionFont[];
     fallbackFonts?: readonly PresentationSessionFont[];
     wasm?: ArrayBuffer | WebAssembly.Module;
+    /** @internal */
+    fontCdn?: FontCdnConfiguration;
 }
 /**
  * Slide metadata without layout; indices are zero-based.
@@ -1648,6 +1653,17 @@ export interface SessionClient<M extends SessionMethods, E extends SessionEvents
 /** Creates a typed client over an existing transport. */
 export declare function createSessionClient<M extends SessionMethods, E extends SessionEvents>(transport: SessionTransport, options: SessionClientOptions<M>): SessionClient<M, E>;
 
+// ---- shared/office-session/fontCdn.d.ts ----
+/** @internal */
+export interface FontCdnConfiguration {
+    baseUrl: string | false;
+    timeoutMs: number;
+}
+/** @internal */
+export declare function getFontCdnConfiguration(): FontCdnConfiguration | undefined;
+/** @internal */
+export declare function setFontCdnConfiguration(configuration: FontCdnConfiguration | undefined): void;
+
 // ---- shared/office-session/fontDecoder.d.ts ----
 export type FontDecoder = (bytes: ArrayBuffer | Uint8Array, options: {
     codec: string;
@@ -1667,6 +1683,34 @@ export declare function copyDecodedFace(face: {
     font: Uint8Array;
     payload?: Uint8Array;
 }): FontDecodeResult;
+
+// ---- shared/office-session/fontPreflight.d.ts ----
+export type PreflightWasmInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
+/** @experimental */
+export interface FontPreflightFace {
+    family: string;
+    bold: boolean;
+    italic: boolean;
+    scripts: string[];
+}
+/** @experimental */
+export interface FontPreflight {
+    faces: FontPreflightFace[];
+    /** False when some font rules could not be resolved. */
+    complete: boolean;
+}
+/** @internal */
+export declare function createPreflightState(options: {
+    assetUrl: () => URL;
+    engineKind: 'wasm' | 'native';
+    initAsync: (input: {
+        module_or_path: PreflightWasmInput;
+    }) => Promise<unknown>;
+}): {
+    status(): "idle" | "loading" | "ready";
+    memory(): WebAssembly.Memory | undefined;
+    preload(input?: PreflightWasmInput): Promise<void>;
+};
 
 // ---- shared/office-session/host.d.ts ----
 import { type TaskExecutor } from './scheduler';
@@ -1703,6 +1747,22 @@ export type PngExportCode = 'canvas-unavailable' | 'canvas-too-large' | 'font-un
 export declare class PngExportError extends Error {
     readonly code: PngExportCode;
     constructor(code: PngExportCode, message: string);
+}
+/** Why a picture was left as a placeholder. */
+export type PngPictureUnavailableReason = 'missing' | 'unsupported' | 'decode-failed' | 'metafile' | 'too-large' | 'budget';
+/** A picture a PNG export drew as a placeholder. `limit` and `actual` say by how much a size or budget limit was passed. */
+export interface PngUnavailablePicture {
+    /** The engine's reference for the picture; empty for one whose relationship has no part, which has nothing to name it by. */
+    id: string;
+    reason: PngPictureUnavailableReason;
+    limit?: number;
+    actual?: number;
+    unit?: 'pixels' | 'bytes' | 'work';
+}
+/** A problem a PNG export worked around: the page still exports. */
+export interface PngDiagnostic {
+    code: 'picture-unavailable';
+    pictures: PngUnavailablePicture[];
 }
 
 // ---- shared/office-session/protocol.d.ts ----
@@ -3695,3 +3755,16 @@ export interface PptxPngOptions {
      */
     fonts?: ReadonlyArray<PptxFontFace>;
 }
+
+// ---- wasm/preflight.d.ts ----
+import { type FontPreflight, type PreflightWasmInput } from '../../../../shared/office-session/fontPreflight';
+export type { FontPreflight, FontPreflightFace } from '../../../../shared/office-session/fontPreflight';
+export declare const preflightWasmState: {
+    status(): "idle" | "loading" | "ready";
+    memory(): WebAssembly.Memory | undefined;
+    preload(input?: PreflightWasmInput): Promise<void>;
+};
+/** @experimental Load the font preflight wasm on demand. Idempotent. */
+export declare function preloadPreflightWasm(input?: PreflightWasmInput): Promise<void>;
+/** @experimental Font faces for a zero-based slide index. Defaults to the first slide. */
+export declare function fontPreflight(bytes: Uint8Array, activeSlide?: number): Promise<FontPreflight>;

@@ -142,6 +142,7 @@ export const editsession_open_docx: (a: number, b: number, c: number, d: number,
 export const editsession_open_docx_preview: (a: number, b: number, c: number, d: number) => [number, number, number, number];
 export const editsession_open_docx_preview_with_budget: (a: number, b: number, c: number, d: number, e: number) => [number, number, number, number];
 export const editsession_outline_glyph_json: (a: number, b: number, c: number) => [number, number, number, number];
+export const editsession_page_texts_json: (a: number, b: number, c: number) => [number, number, number, number];
 export const editsession_paragraph_id_count: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
 export const editsession_paragraph_identities: (a: number) => [number, number, number, number];
 export const editsession_paragraph_save_plan: (a: number) => [number, number, number, number];
@@ -156,6 +157,7 @@ export const editsession_prime_save_seed_states_slice: (a: number, b: number, c:
 export const editsession_proposal_revision_ranges_json: (a: number, b: number, c: number) => [number, number, number, number];
 export const editsession_read_paragraphs_json: (a: number, b: number, c: number) => [number, number, number, number];
 export const editsession_read_stories_json: (a: number, b: number, c: number) => [number, number, number, number];
+export const editsession_rebuild_media_sources: (a: number) => number;
 export const editsession_record_saved_paragraph_ids: (a: number, b: number, c: number) => [number, number, number, number];
 export const editsession_redo: (a: number) => number;
 export const editsession_register_measure_font: (a: number, b: number, c: number) => [number, number, number];
@@ -239,6 +241,7 @@ export const editsession_table_payload: (a: number, b: number, c: number, d: num
 export const editsession_take_base_latin_miss: (a: number) => number;
 export const editsession_toggle_mark: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number) => [number, number, number, number];
 export const editsession_track_undo: (a: number) => void;
+export const editsession_unavailable_tables_from: (a: number, b: number, c: number) => [number, number, number, number];
 export const editsession_undo: (a: number) => number;
 export const editsession_undo_capture_mode: (a: number) => [number, number];
 export const editsession_update_comment_metadata_json: (a: number, b: number, c: number, d: number, e: number) => [number, number];
@@ -297,6 +300,7 @@ export const sanitizeOoxml: (a: number, b: number, c: number, d: number) => [num
 export const serialize_docx_s10: (a: number, b: number) => [number, number, number, number];
 export const serialize_docx_s11: (a: number, b: number) => [number, number, number, number];
 export const serialize_docx_s12: (a: number, b: number) => [number, number, number, number];
+export const set_wasm_heap_counting: (a: number) => number;
 export const set_wasm_heap_limit: (a: number) => void;
 export const unzip_docx: (a: number, b: number) => [number, number, number];
 export const update_display_list: (a: number, b: number, c: number) => [number, number];

@@ -35,6 +35,7 @@ export declare class EditSession {
   reset_frame_base(): void
   build_display_list_json(input: string): string
   renderPngTarget(displayListJson: string, targetJson: string, optionsJson: string): Uint8Array
+  renderPngTargetReport(displayListJson: string, targetJson: string, optionsJson: string): PngTargetReport
   build_display_list_frame(input: string, expectedFrameEpoch: number): Uint8Array
   set_display_window(start: number, end: number): void
   set_display_retain_built_pages(retain: boolean): void
@@ -43,6 +44,7 @@ export declare class EditSession {
   direct_batches_applied(): number
   set_windowed_incremental_builds(enabled: boolean): void
   build_display_pages_frame(pages: Uint32Array, expectedFrameEpoch: number): Uint8Array
+  page_texts_json(pages: Uint32Array): string
   release_display_pages_frame(pages: Uint32Array, expectedFrameEpoch: number): Uint8Array
   resident_caret_snapshot_json(): string
   apply_input(text: string, expectedFrameEpoch: number): Uint8Array
@@ -136,6 +138,7 @@ export declare class EditSession {
   list_stories_json(): string
   load(update: Uint8Array): void
   load_json(storiesJson: string): string
+  rebuild_media_sources(): boolean
   load_media_sources(json: string): void
   load_note_separators(state: Uint8Array): void
   locate_paragraph(story: string, paraId: string): string
@@ -231,6 +234,7 @@ export declare class EditSession {
   stories_changed_since(since: number): string
   story_checksum(story: string): string
   story_ids(): string[]
+  unavailable_tables_from(rootsJson: string): string
   story_len(story: string): number
   story_paragraph_ids(story: string): string
   story_segment_unit_digests(story: string): string
@@ -329,6 +333,19 @@ export declare function parse_docx_s9(data: Uint8Array, optionsJson: string): st
 
 export declare function parse_relationships_xml(xml: Uint8Array, partPath: string): string
 
+export interface PngPictureReport {
+  id: string
+  reason: string
+  limit?: number
+  actual?: number
+  unit?: string
+}
+
+export interface PngTargetReport {
+  png: Uint8Array
+  pictures: Array<PngPictureReport>
+}
+
 export declare function range_rects_by_handle(handle: number, from: number, to: number): string
 
 export declare function range_rects_json(displayList: string, from: number, to: number): string
@@ -349,7 +366,7 @@ export declare function render_docx_markdown_json(content: string, options: stri
 
 export declare function render_docx_markdown_with_pages_json(content: string, options: string): string
 
-/** Native no-op; native allocations are not counted. */
+/** Starts a new peak window at the calling thread's live bytes. */
 export declare function reset_wasm_peak_bytes(): void
 
 export declare function rezip_docx(entries: any): Uint8Array
@@ -362,6 +379,12 @@ export declare function serialize_docx_s11(requestJson: string): string
 
 export declare function serialize_docx_s12(requestJson: string): string
 
+/**
+ * Starts counting heap bytes on every thread when `on` is true; counting starts at zero and
+ * cannot be stopped again, so `false` changes nothing. Returns whether counting is on.
+ */
+export declare function set_wasm_heap_counting(on: boolean): boolean
+
 /** Native no-op; native allocations are not limited. */
 export declare function set_wasm_heap_limit(bytes: number): void
 
@@ -373,16 +396,19 @@ export declare function vertical_move_by_handle(handle: number, position: number
 
 export declare function vertical_move_json(displayList: string, position: number, direction: string, goalX: number): string
 
-/** Native no-op; native allocations are not counted. */
+/** Size of the calling thread's last allocation that failed, or 0. */
 export declare function wasm_failed_allocation_bytes(): number
 
-/** Native no-op; native allocations are not counted. */
+/**
+ * Whether the counters below see every allocation of this thread's engine: false until
+ * `set_wasm_heap_counting(true)`.
+ */
 export declare function wasm_heap_counted(): boolean
 
-/** Native no-op; native allocations are not counted. */
+/** Bytes the calling thread currently holds on the engine's heap. */
 export declare function wasm_live_bytes(): number
 
-/** Native no-op; native allocations are not counted. */
+/** The most bytes the calling thread held at once since it started or the last reset. */
 export declare function wasm_peak_bytes(): number
 
 export declare function write_docx_s13_wasm(requestJson: string, originalDocx: Uint8Array): Uint8Array

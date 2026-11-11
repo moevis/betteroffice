@@ -1,6 +1,7 @@
 /// <reference lib="webworker" />
 
 import { isEngineTrap } from '../../../../shared/office-session/trap';
+import { isCellHasNoStoryRefusal } from './cellRefusal';
 import { resolveReservations, validReservationsPayload, type DocxResolvedReservations } from './reservations';
 import { readParsedToolbarMetadata, readResidentToolbarMetadata, type DocxToolbarMetadata } from './residentToolbarMetadata';
 import { readResidentRangeHighlights } from './residentRangeHighlights';
@@ -56,6 +57,7 @@ import {
 import { finalPreviewDisplayWindow, finalPreviewPageCount } from './previewDisplayWindow';
 import { decodePackedFontFace, preloadEditWasm, preloadEditWasmFrom } from './wasm/index';
 import { shipsWasmAsset } from '../wasm/assetEdit';
+import { engineKind } from '../wasm/engineEdit';
 import { copyDecodedFace, fontBytes } from '../../../../shared/office-session/fontDecoder';
 import { glyphsByFont, ResidentProgressiveFonts, type ProgressiveFontSpec } from './residentProgressiveFonts';
 import {
@@ -84,7 +86,7 @@ import { partMetadata } from './residentParts';
 import { readControlHandles } from './residentControls';
 import { readResidentProperties } from './residentProperties';
 import { readResidentFrameGeometry, readResidentCellSelectionRects, resetResidentObjectHandles } from './residentObjectGeometry';
-import { cellSelectionHeadPosition, readCellSelection } from './residentCommandTableSelection';
+import { cellSelectionHeadPosition, readCellSelection, rootOf, shownStory } from './residentCommandTableSelection';
 import {
   resolveBookmarkPosition,
   resolveBookmarkTarget,
@@ -97,6 +99,7 @@ import {
 } from './viewerSelection';
 import { readAdjacentRevision, readSidebar, readOutlineHeadings } from './sidebarReads';
 import { clipboardTablePayload, readClipboardSlice } from './clipboardFragment';
+import { isTableUnavailableRefusal, isUnavailableTablePayload, tableUnavailableError } from './tableUnavailable';
 import { storyOffsetForLoc, tableAnchors } from './storyPlainText';
 import { createResidentScheduler, type SchedulerMessage } from './residentScheduler';
 import { hasCachedYrsSidebarProjection } from '../layout/render/yrsSidebarProjection';
@@ -1317,6 +1320,7 @@ let editorSaves: ResidentSaveRecord = { full: false };
 let saveSeedStatesPrimed = false;
 class SaveUnavailableError extends Error {}
 class SourceCutKeptError extends Error {}
+class InvalidSelectionError extends Error {}
 let openedVersion: string | null | undefined;
 /** A change before the whole document's first frame leaves no frame as opened. */
 function noteDocumentChange(): void {
@@ -1649,6 +1653,8 @@ function replyFailure(id: number, error: unknown): void {
     error: error instanceof Error ? error.message : String(error),
     ...(failure instanceof SaveUnavailableError ? { code: 'save-unavailable' as const } : {}),
     ...(failure instanceof SourceCutKeptError ? { code: 'cut-kept' as const } : {}),
+    ...(failure instanceof InvalidSelectionError ? { code: 'invalid-selection' as const } : {}),
+    ...(isTableUnavailableRefusal(failure) ? { code: 'table-unavailable' as const } : {}),
   });
 }
 
@@ -2293,19 +2299,19 @@ async function handle(request: ScheduledRequest): Promise<void> {
           cells.anchor.tableIndex !== cells.head.tableIndex ||
           cells.anchor.row !== cells.head.row || cells.anchor.column !== cells.head.column);
         if (multiCell && cells) {
-          const payload = clipboardTablePayload(
-            session.tablePayload(cells.anchor.story, cells.anchor.tableIndex),
-          );
-          const holds = !!payload &&
-            tableAnchors(payload).anchors.some(
-              (cell) => focus.story === cell.story || focus.story.startsWith(`${cell.story}:`),
-            );
+          const raw = session.tablePayload(cells.anchor.story, cells.anchor.tableIndex);
+          if (raw && isUnavailableTablePayload(raw)) throw tableUnavailableError();
+          const payload = clipboardTablePayload(raw);
+          const anchors = payload ? tableAnchors(payload).anchors : [];
+          const holds = anchors.some((cell) => focus.story === cell.story) ||
+            (anchors.some((cell) => focus.story.startsWith(`${cell.story}:`)) &&
+              shownStory(session, rootOf(focus.story), null, focus.story));
           if (holds) {
             value = readClipboardSlice(reader, { cells });
             break;
           }
         }
-        if (anchor.story !== focus.story) throw new Error('Cross-story selection is unavailable');
+        if (anchor.story !== focus.story) throw new InvalidSelectionError('Cross-story selection is unavailable');
         value = readClipboardSlice(reader, {
           story: anchor.story,
           from: storyOffsetForLoc(session.geometryReader, anchor),
@@ -2526,6 +2532,13 @@ async function handle(request: ScheduledRequest): Promise<void> {
         break;
       case 'headings':
         value = readOutlineHeadings(session.geometryReader, request.read.expectVersion);
+        break;
+      case 'pageTexts':
+        value = !retainedFrame || retainedLayoutVersion !== engine.version() ||
+          (request.read.expectFrameEpoch !== undefined && request.read.expectFrameEpoch !== retainedFrame.frameEpoch) ||
+          (request.read.expectLayoutRevision !== undefined && request.read.expectLayoutRevision !== layoutRevision)
+          ? null : { pages: JSON.parse(session.pageTextsJson(Uint32Array.from(request.read.pages))),
+            frameEpoch: retainedFrame.frameEpoch, layoutRevision };
         break;
       case 'adjacentRevision':
         value = readAdjacentRevision(session.geometryReader, request.read.selection, request.read.direction,
@@ -2853,7 +2866,9 @@ async function handle(request: ScheduledRequest): Promise<void> {
       id: request.id,
       ok: false,
       error: message,
-      residentUnavailable: message.includes('resident input state is not ready'),
+      // A write into a table cell with no story is refused before the engine changes anything.
+      residentUnavailable: message.includes('resident input state is not ready') ||
+        (pendingUpdates.length === 0 && isCellHasNoStoryRefusal(error)),
       // The edit committed here but never reached the host: this replica is
       // no longer the host's, so the host must replace it.
       ...(pendingUpdates.length > 0 ? { terminal: true } : {}),
@@ -4125,6 +4140,8 @@ function saveWarmupCurrent(attempt: SaveWarmup): boolean {
 }
 
 function saveWarmupHasHeadroom(): boolean {
+  // Save warmup is sized against a wasm32 memory; the native engine does not run it.
+  if (engineKind === 'native') return false;
   const configured = openedDocument?.heapLimitBytes;
   if (configured !== undefined && (!Number.isSafeInteger(configured) || configured <= 0)) return false;
   let memory: ReturnType<typeof wasmModuleMemories>[number] | undefined;

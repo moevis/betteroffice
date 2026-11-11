@@ -1,3 +1,4 @@
+import { usePluginGestures } from '../../../../shared/plugin-host/usePluginGestures';
 import {
   anchorSelection, clearedCells, copiedRange, createSelectionDataNavigation, mergeAnchorCell, reachesSheetEdge,
   selectionDataRequest, selectionFrameContains, selectionHidden, selectionMerges, workbookSelectionMerges,
@@ -54,7 +55,7 @@ import type { WorkerEditorApiBridge } from './createWorkerEditorApi';
 import { useLegacySessionWorkbook, EditableWorkbookSession, type EditableSessionWorkbookProps } from './useEditableSessionWorkbook';
 import type { WorkerPaintRequest, WorkerPaintResult } from './WorkerPaintSource';
 import { WorkerPaintSource } from './WorkerPaintSource';
-import { A11yGridCell } from '../components/A11yGridCell';
+import { A11yGridTable } from '../components/A11yGridCell';
 
 const BRAND = '#217346';
 const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
@@ -118,8 +119,9 @@ function revealAxis(position: number, size: number, frozen: boolean, scroll: num
 }
 
 export function LegacyXlsxWorkerEditor(props: EditableSessionWorkbookProps) {
-  const { t } = useTranslation();
+  const { t, lang } = useTranslation();
   const rootRef = useRef<HTMLDivElement>(null);
+  usePluginGestures(rootRef);
   const scrollRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const editorInputRef = useRef<HTMLInputElement | null>(null);
@@ -711,9 +713,10 @@ export function LegacyXlsxWorkerEditor(props: EditableSessionWorkbookProps) {
     return sheetId === undefined ? null : { sheetId, sheetIndex: active,
       cells: selection, chartId: selectedChart?.id ?? null };
   }, [run, active, selection, selectedChart]);
-  const pluginHost = useXlsxPluginHost({ ...props, access: pluginAccess, commands, editGate: false,
+  const pluginHost = useXlsxPluginHost({ locale: lang, focusRoot: scrollRef, ...props, access: pluginAccess, commands, editGate: false,
     readOnly: props.readOnly ?? false, handle: run?.ready && !run.failure ? run.peer : null,
     selection: pluginSelection, proposals, staleFor, proposalsPending: () => coordinator.pending, canvasRef, t,
+    selectionPaintReady: (sheet) => sourceRef.current?.selectionPaintReady(sheet, activeRef.current) ?? (() => true),
     positionAtPoint: (clientX, clientY) => {
       const owner = runRef.current;
       return owner?.current && !owner.retiring && !owner.failure ? apiBridge.getPositionAtPoint?.(clientX, clientY) ?? null : null;
@@ -771,6 +774,9 @@ export function LegacyXlsxWorkerEditor(props: EditableSessionWorkbookProps) {
           previewState.committed = null;
           flushSync(() => setPreviewDraft(null));
         }
+      },
+      onInstalled(painted) {
+        const request = painted.request;
         const sheetId = run.session.state.sheets[request.sheet]?.id;
         presentGridRef.current(sheetId === undefined ? null : {
           frame: painted.displayList, zoom: request.zoom, viewport: request.viewport, version: painted.version, sheetId,
@@ -1849,13 +1855,7 @@ export function LegacyXlsxWorkerEditor(props: EditableSessionWorkbookProps) {
             {renderDock('right')}
           </div>
           {a11yGrid && <>
-            <div style={visuallyHidden} role="grid" aria-label={a11yGrid.label}>
-              <div role="row"><span role="columnheader" />{a11yGrid.columnHeaders.map((header) =>
-                <span key={header.col} role="columnheader">{header.label}</span>)}</div>
-              {a11yGrid.rows.map((row) => <div key={row.row} role="row"><span role="rowheader">{row.header}</span>
-                {row.cells.map((cell) => <A11yGridCell key={cell.col} cell={cell} onFollowLink={followLink} />)}
-              </div>)}
-            </div>
+            <A11yGridTable grid={a11yGrid} style={visuallyHidden} onFollowLink={followLink} />
             {a11yGrid.charts.map((chart, index) => <div key={`${index}:${chart.label}`} style={visuallyHidden} role="img" aria-label={chart.label} />)}
           </>}
           {refusal && <div data-testid="xlsx-input-refusal" role="alert" style={{ position: 'relative', zIndex: 1 }}>{refusal}</div>}

@@ -217,7 +217,10 @@ describe('native package release wiring', () => {
   ) as any;
 
   test('keeps native publishing outside the main release job', () => {
-    const job = release.jobs.release;
+    const job = structuredClone(release.jobs.release);
+    const npmCheck = job.steps.find((step: any) => step.name === 'Check npm publish targets');
+    expect(npmCheck.env).toEqual({ RELEASE_SKIP_NATIVE: '${{ vars.RELEASE_SKIP_NATIVE }}' });
+    delete npmCheck.env;
     expect(job['timeout-minutes']).toBe(90);
     expect(JSON.stringify(job)).not.toContain('native');
     expect(JSON.stringify(job)).not.toContain('withhold');
@@ -463,7 +466,7 @@ describe('native package release wiring', () => {
     const job = ci.jobs.native;
     expect(job.name).toBe('Native gate');
     expect(job['runs-on']).toBe('ubuntu-latest');
-    expect(job['timeout-minutes']).toBe(60);
+    expect(job['timeout-minutes']).toBe(90);
     expect(job.strategy).toBeUndefined();
     expect(job.steps[0].uses).toBe('actions/checkout@v7.0.1');
     const bun = job.steps.find((step: any) => step.uses === 'oven-sh/setup-bun@v2');
@@ -504,7 +507,7 @@ describe('native package release wiring', () => {
     expect(wasm.run).toContain('bun run --filter @betteroffice/docx build:wasm');
     const parity = job.steps.find((step: any) => step.name === 'Check native and wasm parity');
     expect(parity.run).toBe(
-      'bun test bindings/xlsx-native/parity.test.ts bindings/pptx-native/parity.test.ts bindings/xlsx-native/engine.test.ts bindings/pptx-native/engine.test.ts bindings/docx-native/parity.test.ts bindings/docx-native/engine.test.ts bindings/docx-native/png.test.ts bindings/pptx-native/png.test.ts'
+      'bun test bindings/xlsx-native/parity.test.ts bindings/pptx-native/parity.test.ts bindings/xlsx-native/engine.test.ts bindings/pptx-native/engine.test.ts bindings/docx-native/parity.test.ts bindings/docx-native/engine.test.ts bindings/docx-native/png.test.ts bindings/docx-native/displayListParity.test.ts bindings/pptx-native/png.test.ts\nbun test bindings/raw-surface.test.ts\n'
     );
     expect(job.steps.indexOf(wasm)).toBeLessThan(job.steps.indexOf(build));
     expect(job.steps.indexOf(build)).toBeLessThan(job.steps.indexOf(parity));

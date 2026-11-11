@@ -161,6 +161,7 @@ import { TrackedChangesReview } from './sidebar/TrackedChangesReview';
 import { useCanvasReviewGeometry } from './sidebar/canvasReviewGeometry';
 import type { ReactSidebarItem } from '../plugin-api/types';
 import type { DocxEditorPluginProps } from '../plugins/types';
+import { resolvedLocale } from '../i18n/LocaleContext';
 import { useDocxPluginHost } from '../plugins/useDocxPluginHost';
 import { PluginOverlays } from '../plugins/PluginOverlays';
 import { PluginDock } from '../plugins/PluginPanels';
@@ -344,6 +345,14 @@ export interface DocxEditorBaseProps extends DocxEditorPluginProps {
    * gives assistive tech no on-page positions and plugin DOM range queries no elements.
    */
   pageMirror?: 'full' | 'text';
+  /**
+   * Plain paragraphs for pages the worker-only editor has not built yet, without layout
+   * positions or headings. Tables read as paragraphs; notes, text boxes, headers, footers and
+   * list numbers or bullets are omitted. Beyond a reading window, a line names the page range with a Go to page
+   * control. Find in page matches no text outside that window. `pageMirror` covers built
+   * pages and replaces the section when a page is built. Default: `'text'`.
+   */
+  unbuiltPageMirror?: 'text' | 'off';
   /**
    * Lets the ref's proposal methods run while the editor is read-only or viewing. Typing,
    * `applyEdits`, commands and plugin writes stay blocked. Default: false.
@@ -2013,6 +2022,10 @@ const LegacyDocxEditor = forwardRef<DocxEditorRef, DocxEditorBaseProps>(function
       ? yrsCore.session
       : null;
   const pluginHost = useDocxPluginHost({
+    locale: resolvedLocale(i18n?._lang),
+    focusRoot: () => editorContentRef.current?.querySelector('.paged-editor') ?? null,
+    scrollContainerRef,
+    editorRootRef: containerRef,
     shortcutsKey: shortcuts === undefined ? undefined : JSON.stringify(shortcuts),
     experimentalWorkerOpen: workerOpen,
     plugins,
@@ -2816,6 +2829,7 @@ const LegacyDocxEditor = forwardRef<DocxEditorRef, DocxEditorBaseProps>(function
               onYrsContentChange={handleYrsContentChange}
               onPagedSelectionChange={handlePagedSelectionChange}
               onYrsSelectionChange={handleYrsToolbarSelectionChange}
+              onYrsPartSelectionChange={pluginHost.publishSelection}
               onViewerSelectionChange={handlePagedViewerSelectionChange}
               onRenderedDomContextReady={
                 pluginHost.managed || onRenderedDomContextReady

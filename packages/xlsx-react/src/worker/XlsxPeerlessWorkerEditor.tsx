@@ -1,3 +1,4 @@
+import { usePluginGestures } from '../../../../shared/plugin-host/usePluginGestures';
 import type { NavigationContext } from '../selectionData';
 import {
   copiedSelection, createSelectionDataNavigation, MAX_CLEAR_CELLS, mergeAnchorCell, sameSelection, selectionDataRequest, selectionFrameContains, selectionHidden, selectionMerges,
@@ -197,9 +198,10 @@ function guardEntries(entries: readonly OverflowMenuEntry[], ready: () => boolea
 }
 
 export function XlsxPeerlessWorkerEditor(props: PeerlessSessionWorkbookProps) {
-  const { t } = useTranslation();
+  const { t, lang } = useTranslation();
   const [cellClipboard] = useState(() => new CellClipboard());
   const rootRef = useRef<HTMLDivElement>(null);
+  usePluginGestures(rootRef);
   const scrollRef = useRef<HTMLDivElement>(null);
   const announceRef = useRef<(() => void) | null>(null);
   const gridId = useId();
@@ -588,10 +590,20 @@ export function XlsxPeerlessWorkerEditor(props: PeerlessSessionWorkbookProps) {
   }));
   const pluginIdentity = pluginAccess.identity();
   const pluginSelection = pluginIdentity ? pluginAccess.selection!(pluginIdentity) : null;
-  const pluginHost = useXlsxPluginHost({ ...props, access: pluginAccess, commands,
+  const pluginHost = useXlsxPluginHost({ locale: lang, focusRoot: scrollRef, ...props, access: pluginAccess, commands,
     createClients: createPeerlessPluginClients, createGeometry: createPeerlessPluginGeometry,
     readOnly: props.readOnly ?? false, handle: pluginIdentity, selection: pluginSelection, proposals, staleFor,
     proposalsPending: () => coordinator.pending || proposalsPending.current !== null, canvasRef, t,
+    selectionPaintReady: (sheet) => {
+      const source = sourceRef.current;
+      const ready = source?.selectionPaintReady(sheet, activeRef.current) ?? (() => true);
+      const sequence = Math.max(0, ...[...requests].filter(([, request]) => request.sheet === sheet).map(([seq]) => seq));
+      return () => {
+        const painted = source?.painted;
+        return ready() && (!sequence || (painted?.request.sheet === sheet &&
+          !painted.provisional && (source?.coversThroughSeq ?? -1) >= sequence));
+      };
+    },
     positionAtPoint: (clientX, clientY) => {
       const owner = ownerRef.current;
       const frame = sourceRef.current?.painted;

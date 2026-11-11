@@ -166,6 +166,7 @@ export type DocxDocumentRead =
   | { kind: 'bookmarkPosition'; story: string; name: string; expectVersion: string }
   | { kind: 'sidebar'; commentIds: string[]; expectVersion: string }
   | { kind: 'headings'; expectVersion: string }
+  | { kind: 'pageTexts'; pages: number[]; expectFrameEpoch?: number; expectLayoutRevision?: number }
   | { kind: 'adjacentRevision'; selection: DocxCommandSelection | null; direction: 'next' | 'previous' };
 
 /** @internal */
@@ -215,6 +216,7 @@ export interface DocxDocumentReadValues {
   bookmarkPosition: number | null;
   sidebar: DocxSidebarRead | null;
   headings: DocxOutlineHeading[] | null;
+  pageTexts: { pages: { pageIndex: number; paragraphs: { text: string; paraId?: string; level?: number; inTable?: true }[] }[]; frameEpoch: number; layoutRevision: number } | null;
   adjacentRevision: { revisionId: string } | null;
 }
 
@@ -499,7 +501,7 @@ export type DocxEngineWorkerResponse = (
       commandError?: ReplyError;
       failureCode?: SessionFailureCode;
       /** @internal */
-      code?: 'save-unavailable' | 'cut-kept';
+      code?: 'save-unavailable' | 'cut-kept' | 'invalid-selection' | 'table-unavailable';
       residentUnavailable?: boolean;
       /** A wasm trap poisoned the worker; it refuses every later request. */
       terminal?: boolean;

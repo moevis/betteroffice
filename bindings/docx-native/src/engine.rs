@@ -23,6 +23,21 @@ pub struct DecodedFontFace {
     pub payload: Option<Uint8Array>,
 }
 
+#[napi(object)]
+pub struct PngTargetReport {
+    pub png: Uint8Array,
+    pub pictures: Vec<PngPictureReport>,
+}
+
+#[napi(object)]
+pub struct PngPictureReport {
+    pub id: String,
+    pub reason: String,
+    pub limit: Option<f64>,
+    pub actual: Option<f64>,
+    pub unit: Option<String>,
+}
+
 #[napi(
     catch_unwind,
     js_name = "decodeFontFace",
@@ -301,6 +316,18 @@ fn map_error(env: Env, error: EngineError) -> Error {
                 exception.set_named_property("code", "suggested-formatting-over-container")?;
                 env.throw(exception)
             }
+            EngineErrorKind::TableUnavailable => {
+                let mut exception = env.create_error(Error::from_reason(error.message.clone()))?;
+                exception.set_named_property("name", "TableUnavailableError")?;
+                exception.set_named_property("code", "table-unavailable")?;
+                env.throw(exception)
+            }
+            EngineErrorKind::CellHasNoStory => {
+                let mut exception = env.create_error(Error::from_reason(error.message.clone()))?;
+                exception.set_named_property("name", "CellHasNoStoryError")?;
+                exception.set_named_property("code", "cell-has-no-story")?;
+                env.throw(exception)
+            }
         }
     })();
     match result {
@@ -470,6 +497,122 @@ impl EditSession {
             core,
             _delivery: UpdateDelivery(self),
         })
+    }
+
+    fn render_png_target_page(
+        &self,
+        env: Env,
+        display_list_json: String,
+        target_json: String,
+        options_json: String,
+    ) -> Result<docx_raster::RenderedPage> {
+        let document = self.document(env)?;
+        #[cfg(feature = "test-hooks")]
+        if self.panic_png.replace(false) {
+            panic!("renderPngTarget");
+        }
+        let (page, scale) = png_request(&target_json, &options_json)
+            .map_err(|message| throw_error(&env, &message))?;
+        let value: serde_json::Value = serde_json::from_str(&display_list_json)
+            .map_err(|error| throw_error(&env, &format!("png-invalid: {error}")))?;
+        let chains: std::collections::HashMap<String, Vec<u32>> = match value.get("fontChains") {
+            Some(chains) => serde_json::from_value(chains.clone())
+                .map_err(|error| throw_error(&env, &format!("png-invalid: {error}")))?,
+            None => std::collections::HashMap::new(),
+        };
+        let list: docx_layout::display_list::DisplayList = serde_json::from_value(value)
+            .map_err(|error| throw_error(&env, &format!("png-invalid: {error}")))?;
+        let display_page = list
+            .pages
+            .get(page)
+            .filter(|page| !page.unbuilt)
+            .ok_or_else(|| throw_error(&env, "png-invalid: page is unavailable"))?;
+        let dimension = |number: &serde_json::Number| -> Result<u32> {
+            let value = number
+                .as_f64()
+                .filter(|value| value.is_finite() && *value > 0.0)
+                .ok_or_else(|| {
+                    throw_error(&env, "png-invalid: page dimensions must be positive")
+                })?;
+            let scaled = (value * scale).ceil();
+            if !scaled.is_finite() || scaled > f64::from(docx_raster::MAX_PAGE_DIM) {
+                return Err(throw_error(
+                    &env,
+                    "png-too-large: page exceeds the dimension limit",
+                ));
+            }
+            Ok(scaled.max(1.0) as u32)
+        };
+        let width = dimension(&display_page.width)?;
+        let height = dimension(&display_page.height)?;
+        if u64::from(width) * u64::from(height) > docx_raster::MAX_PAGE_PIXELS {
+            return Err(throw_error(
+                &env,
+                "png-too-large: page exceeds the pixel limit",
+            ));
+        }
+        let chains = chains
+            .into_iter()
+            .map(|(key, ids)| {
+                (
+                    key,
+                    ids.into_iter().map(ooxml_text::FontId::from_u32).collect(),
+                )
+            })
+            .collect();
+        let mut images = docx_raster::ImageMap::new();
+        collect_png_images(
+            &document,
+            &display_page.primitives,
+            docx_raster::ImageScope::Body,
+            &mut images,
+        );
+        for region in [&display_page.header, &display_page.footer]
+            .into_iter()
+            .flatten()
+        {
+            collect_png_images(
+                &document,
+                &region.primitives,
+                docx_raster::ImageScope::HeaderFooter(&region.r_id),
+                &mut images,
+            );
+        }
+        for area in &display_page.note_areas {
+            let kind = if area.kind.as_deref() == Some("endnote") {
+                docx_raster::NoteKind::Endnote
+            } else {
+                docx_raster::NoteKind::Footnote
+            };
+            let scope = docx_raster::ImageScope::Notes(kind);
+            collect_png_images(&document, &area.separator_primitives, scope, &mut images);
+            collect_png_images(&document, &area.primitives, scope, &mut images);
+        }
+        document
+            .with_measure_fonts_ref(|fonts| {
+                let resources = docx_raster::RenderResources::new(fonts, &chains, &images);
+                docx_raster::render_page_cached_scaled(
+                    &list,
+                    page,
+                    &resources,
+                    &mut docx_raster::GlyphCache::default(),
+                    &mut docx_raster::ImageCache::default(),
+                    scale as f32,
+                )
+            })
+            .map_err(|error| {
+                let prefix = if error.contains("unknown FontId")
+                    || error.starts_with("missing font chain")
+                    || (error.starts_with("font chain") && error.contains("empty"))
+                {
+                    "png-font-unavailable:"
+                } else if error.contains("past the") || error.contains("budget") {
+                    "png-too-large:"
+                } else {
+                    "png-invalid:"
+                };
+                throw_error(&env, &format!("{prefix} {error}"))
+            })
     }
 
     fn clear_observer(&self, env: Env) -> Result<()> {
@@ -813,125 +956,35 @@ impl EditSession {
         options_json: String,
     ) -> Result<Uint8Array> {
         let _call = EngineCall::new(env);
-        let document = self.document(env)?;
-        #[cfg(feature = "test-hooks")]
-        if self.panic_png.replace(false) {
-            panic!("renderPngTarget");
-        }
-        let (page, scale) = png_request(&target_json, &options_json)
-            .map_err(|message| throw_error(&env, &message))?;
-        let value: serde_json::Value = serde_json::from_str(&display_list_json)
-            .map_err(|error| throw_error(&env, &format!("png-invalid: {error}")))?;
-        let chains: std::collections::HashMap<String, Vec<u32>> = match value.get("fontChains") {
-            Some(chains) => serde_json::from_value(chains.clone())
-                .map_err(|error| throw_error(&env, &format!("png-invalid: {error}")))?,
-            None => std::collections::HashMap::new(),
-        };
-        let list: docx_layout::display_list::DisplayList = serde_json::from_value(value)
-            .map_err(|error| throw_error(&env, &format!("png-invalid: {error}")))?;
-        let display_page = list
-            .pages
-            .get(page)
-            .filter(|page| !page.unbuilt)
-            .ok_or_else(|| throw_error(&env, "png-invalid: page is unavailable"))?;
-        let dimension = |number: &serde_json::Number| -> Result<u32> {
-            let value = number
-                .as_f64()
-                .filter(|value| value.is_finite() && *value > 0.0)
-                .ok_or_else(|| {
-                    throw_error(&env, "png-invalid: page dimensions must be positive")
-                })?;
-            let scaled = (value * scale).ceil();
-            if !scaled.is_finite() || scaled > f64::from(docx_raster::MAX_PAGE_DIM) {
-                return Err(throw_error(
-                    &env,
-                    "png-too-large: page exceeds the dimension limit",
-                ));
-            }
-            Ok(scaled.max(1.0) as u32)
-        };
-        let width = dimension(&display_page.width)?;
-        let height = dimension(&display_page.height)?;
-        if u64::from(width) * u64::from(height) > docx_raster::MAX_PAGE_PIXELS {
-            return Err(throw_error(
-                &env,
-                "png-too-large: page exceeds the pixel limit",
-            ));
-        }
-        let chains = chains
-            .into_iter()
-            .map(|(key, ids)| {
-                (
-                    key,
-                    ids.into_iter().map(ooxml_text::FontId::from_u32).collect(),
-                )
-            })
-            .collect();
-        let mut images = docx_raster::ImageMap::new();
-        collect_png_images(
-            &document,
-            &display_page.primitives,
-            docx_raster::ImageScope::Body,
-            &mut images,
-        );
-        for region in [&display_page.header, &display_page.footer]
-            .into_iter()
-            .flatten()
-        {
-            collect_png_images(
-                &document,
-                &region.primitives,
-                docx_raster::ImageScope::HeaderFooter(&region.r_id),
-                &mut images,
-            );
-        }
-        for area in &display_page.note_areas {
-            let kind = if area.kind.as_deref() == Some("endnote") {
-                docx_raster::NoteKind::Endnote
-            } else {
-                docx_raster::NoteKind::Footnote
-            };
-            let scope = docx_raster::ImageScope::Notes(kind);
-            collect_png_images(&document, &area.separator_primitives, scope, &mut images);
-            collect_png_images(&document, &area.primitives, scope, &mut images);
-        }
-        document
-            .with_measure_fonts_ref(|fonts| {
-                let resources = docx_raster::RenderResources::new(fonts, &chains, &images);
-                docx_raster::render_page_cached_scaled(
-                    &list,
-                    page,
-                    &resources,
-                    &mut docx_raster::GlyphCache::default(),
-                    &mut docx_raster::ImageCache::default(),
-                    scale as f32,
-                )
-            })
-            .map_err(|error| {
-                let prefix = if error.contains("unknown FontId")
-                    || error.starts_with("missing font chain")
-                    || (error.starts_with("font chain") && error.contains("empty"))
-                {
-                    "png-font-unavailable:"
-                } else if error.contains("past the") || error.contains("budget") {
-                    "png-too-large:"
-                } else {
-                    "png-invalid:"
-                };
-                throw_error(&env, &format!("{prefix} {error}"))
-            })
-            .and_then(|page| {
-                if page.skipped_images > 0 {
-                    return Err(throw_error(
-                        &env,
-                        &format!(
-                            "png-picture-unavailable: {} picture(s) on this page could not be drawn",
-                            page.skipped_images
-                        ),
-                    ));
-                }
-                byte_result(env, page.bytes)
-            })
+        self.render_png_target_page(env, display_list_json, target_json, options_json)
+            .and_then(|page| byte_result(env, page.bytes))
+    }
+
+    #[napi(catch_unwind, js_name = "renderPngTargetReport")]
+    pub fn render_png_target_report(
+        &self,
+        env: Env,
+        display_list_json: String,
+        target_json: String,
+        options_json: String,
+    ) -> Result<PngTargetReport> {
+        let _call = EngineCall::new(env);
+        let page =
+            self.render_png_target_page(env, display_list_json, target_json, options_json)?;
+        Ok(PngTargetReport {
+            png: byte_result(env, page.bytes)?,
+            pictures: page
+                .skipped_pictures
+                .into_iter()
+                .map(|picture| PngPictureReport {
+                    id: picture.id,
+                    reason: picture.reason.as_str().to_owned(),
+                    limit: picture.limit.map(|limit| limit as f64),
+                    actual: picture.actual.map(|actual| actual as f64),
+                    unit: picture.unit.map(str::to_owned),
+                })
+                .collect(),
+        })
     }
 
     #[napi(catch_unwind, js_name = "build_display_list_frame")]
@@ -1001,6 +1054,14 @@ impl EditSession {
             .build_display_pages_frame(pages.to_vec(), expected_frame_epoch)
             .map_err(|error| map_error(env, error))
             .and_then(|bytes| byte_result(env, bytes))
+    }
+
+    #[napi(catch_unwind, js_name = "page_texts_json")]
+    pub fn page_texts_json(&self, env: Env, pages: Uint32Array) -> Result<String> {
+        let _call = EngineCall::new(env);
+        self.document(env)?
+            .page_texts_json(pages.to_vec())
+            .map_err(|error| map_error(env, error))
     }
 
     #[napi(catch_unwind, js_name = "release_display_pages_frame")]
@@ -2077,6 +2138,12 @@ impl EditSession {
             .map_err(|error| map_error(env, error))
     }
 
+    #[napi(catch_unwind, js_name = "rebuild_media_sources")]
+    pub fn rebuild_media_sources(&self, env: Env) -> Result<bool> {
+        let _call = EngineCall::new(env);
+        Ok(self.document(env)?.rebuild_media_sources())
+    }
+
     #[napi(catch_unwind, js_name = "load_media_sources")]
     pub fn load_media_sources(&self, env: Env, json: String) -> Result<()> {
         let _call = EngineCall::new(env);
@@ -3104,6 +3171,14 @@ impl EditSession {
         Ok(self.document(env)?.story_ids())
     }
 
+    #[napi(catch_unwind, js_name = "unavailable_tables_from")]
+    pub fn unavailable_tables_from(&self, env: Env, roots_json: String) -> Result<String> {
+        let _call = EngineCall::new(env);
+        self.document(env)?
+            .unavailable_tables_from(&roots_json)
+            .map_err(|error| map_error(env, error))
+    }
+
     #[napi(catch_unwind, js_name = "story_len")]
     pub fn story_len(&self, env: Env, story: String) -> Result<u32> {
         let _call = EngineCall::new(env);
@@ -3785,33 +3860,47 @@ pub fn rezip_docx(env: Env, entries: Unknown<'_>) -> Result<Uint8Array> {
         .and_then(|bytes| byte_result(env, bytes))
 }
 
-/// Native no-op; native allocations are not counted.
+/// Whether the counters below see every allocation of this thread's engine: false until
+/// `set_wasm_heap_counting(true)`.
 #[napi(catch_unwind, js_name = "wasm_heap_counted")]
 pub fn wasm_heap_counted() -> bool {
-    false
+    crate::heap::enabled()
 }
 
-/// Native no-op; native allocations are not counted.
+/// Starts counting heap bytes on every thread when `on` is true; counting starts at zero and
+/// cannot be stopped again, so `false` changes nothing. Returns whether counting is on.
+#[napi(catch_unwind, js_name = "set_wasm_heap_counting")]
+pub fn set_wasm_heap_counting(on: bool) -> bool {
+    if on {
+        crate::heap::enable()
+    } else {
+        crate::heap::enabled()
+    }
+}
+
+/// Bytes the calling thread currently holds on the engine's heap.
 #[napi(catch_unwind, js_name = "wasm_live_bytes")]
 pub fn wasm_live_bytes() -> f64 {
-    0.0
+    crate::heap::live() as f64
 }
 
-/// Native no-op; native allocations are not counted.
+/// The most bytes the calling thread held at once since it started or the last reset.
 #[napi(catch_unwind, js_name = "wasm_peak_bytes")]
 pub fn wasm_peak_bytes() -> f64 {
-    0.0
+    crate::heap::peak() as f64
 }
 
-/// Native no-op; native allocations are not counted.
+/// Size of the calling thread's last allocation that failed, or 0.
 #[napi(catch_unwind, js_name = "wasm_failed_allocation_bytes")]
 pub fn wasm_failed_allocation_bytes() -> f64 {
-    0.0
+    crate::heap::failed_bytes() as f64
 }
 
-/// Native no-op; native allocations are not counted.
+/// Starts a new peak window at the calling thread's live bytes.
 #[napi(catch_unwind, js_name = "reset_wasm_peak_bytes")]
-pub fn reset_wasm_peak_bytes() {}
+pub fn reset_wasm_peak_bytes() {
+    crate::heap::reset_peak();
+}
 
 /// Native no-op; native allocations are not limited.
 #[napi(catch_unwind, js_name = "set_wasm_heap_limit")]

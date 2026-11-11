@@ -662,6 +662,7 @@ pub fn apply_in_place(wb: &mut Workbook, op: &Op) -> Result<InvertedOp, OpError>
             let idx = (*index).min(wb.sheets.len());
             wb.sheets.insert(idx, Sheet::new(name.clone()));
             shift_defined_name_scopes(wb, idx);
+            shift_tables(wb, idx);
             Ok(InvertedOp(vec![Op::RemoveSheet { index: idx }]))
         }
         Op::RemoveSheet { index } => remove_sheet(wb, *index),
@@ -787,6 +788,17 @@ pub fn apply_in_place(wb: &mut Workbook, op: &Op) -> Result<InvertedOp, OpError>
                 wb,
                 defined_names.clone(),
             )]))
+        }
+        Op::SetTables { tables } => {
+            if let Some(table) = tables
+                .iter()
+                .find(|table| table.sheet.0 as usize >= wb.sheets.len())
+            {
+                return Err(OpError::SheetNotFound(table.sheet));
+            }
+            Ok(InvertedOp(vec![Op::SetTables {
+                tables: std::mem::replace(&mut wb.tables, tables.clone()),
+            }]))
         }
         Op::InsertRows { sheet, at, count } => insert_rows(wb, *sheet, *at, *count, op),
         Op::DeleteRows { sheet, at, count } => delete_rows(wb, *sheet, *at, *count, op),
@@ -1465,12 +1477,29 @@ fn insert_rows(
             s.row_styles.insert(row, style);
         }
     }
+    let overflow = drop_dimensions_past_grid(
+        &mut s.row_heights,
+        &mut s.hidden_row_heights,
+        at,
+        count,
+        MAX_ROWS,
+    );
     shift_row_heights_up(s, at, count);
     remap_merges_keep(s, op);
     remap_hyperlinks(s, op);
     let auto_filter_restore = remap_auto_filter(s, sheet, op);
 
     let mut inv = vec![Op::DeleteRows { sheet, at, count }];
+    inv.extend(
+        overflow
+            .into_iter()
+            .map(|(row, height, hidden_height)| Op::RestoreRowDimension {
+                sheet,
+                row,
+                height,
+                hidden_height,
+            }),
+    );
     if !old_row_styles.is_empty() {
         inv.push(Op::RestoreRowStyles {
             sheet,
@@ -1586,13 +1615,39 @@ fn insert_cols(
     let old_hyperlinks = s.hyperlinks.clone();
     let old_col_styles = s.col_styles.clone();
     let dropped = shift_cells(s, op);
+    let within_run = run_around(&s.col_widths, &s.hidden_col_widths, at);
+    let overflow = drop_dimensions_past_grid(
+        &mut s.col_widths,
+        &mut s.hidden_col_widths,
+        at,
+        count,
+        MAX_COLS,
+    );
     shift_col_widths_up(s, at, count);
+    if let Some((width, hidden)) = within_run {
+        for col in at..at.saturating_add(count).min(MAX_COLS) {
+            s.col_widths.insert(col, width);
+            if let Some(hidden) = hidden {
+                s.hidden_col_widths.insert(col, hidden);
+            }
+        }
+    }
     shift_col_styles_up(s, at, count);
     remap_merges_keep(s, op);
     remap_hyperlinks(s, op);
     let auto_filter_restore = remap_auto_filter(s, sheet, op);
 
     let mut inv = vec![Op::DeleteCols { sheet, at, count }];
+    inv.extend(
+        overflow
+            .into_iter()
+            .map(|(col, width, hidden_width)| Op::RestoreColDimension {
+                sheet,
+                col,
+                width,
+                hidden_width,
+            }),
+    );
     if !old_col_styles.is_empty() {
         inv.push(Op::RestoreColStyles {
             sheet,
@@ -1684,6 +1739,40 @@ fn delete_cols(
 /// address was dropped, for the inverse.
 fn shift_cells(s: &mut Sheet, op: &Op) -> Vec<(CellRef, Cell)> {
     s.remap_cells(|at| remap_ref(at, op))
+}
+
+/// The size of the run an insert at `at` lands inside: the entries either side of it, when they are
+/// equal. Columns inserted there take it, so a run (a whole-sheet one included) stays whole, with the
+/// left column's remembered hidden size. The decision reads sizes only: an authority that does not
+/// hold remembered hidden sizes replays the same op to the same sizes.
+fn run_around(
+    sizes: &BTreeMap<u32, f64>,
+    hidden: &BTreeMap<u32, f64>,
+    at: u32,
+) -> Option<(f64, Option<f64>)> {
+    let before = at.checked_sub(1)?;
+    let size = *sizes.get(&before)?;
+    (sizes.get(&at) == Some(&size)).then(|| (size, hidden.get(&before).copied()))
+}
+
+/// The sizes an insert would push past the grid's last row or column: formatting only, so they are
+/// dropped, as Excel drops them, and returned for the inverse to restore.
+fn drop_dimensions_past_grid(
+    sizes: &mut BTreeMap<u32, f64>,
+    hidden: &mut BTreeMap<u32, f64>,
+    at: u32,
+    count: u32,
+    max: u32,
+) -> Vec<(u32, Option<f64>, Option<f64>)> {
+    let from = at.max(max.saturating_sub(count));
+    let keys = sizes
+        .range(from..)
+        .chain(hidden.range(from..))
+        .map(|(&key, _)| key)
+        .collect::<std::collections::BTreeSet<_>>();
+    keys.into_iter()
+        .map(|key| (key, sizes.remove(&key), hidden.remove(&key)))
+        .collect()
 }
 
 fn shift_row_heights_up(s: &mut Sheet, at: RowId, count: u32) {
@@ -1872,14 +1961,34 @@ fn remove_sheet(wb: &mut Workbook, index: usize) -> Result<InvertedOp, OpError> 
         .map(|sheet| sheet.name.clone())
         .collect::<Vec<_>>();
     let removed_name = wb.sheets[index].name.clone();
+    let dropped_tables = wb
+        .tables
+        .iter()
+        .filter(|table| table.sheet.0 as usize == index)
+        .map(|table| table.name.clone())
+        .collect::<Vec<_>>();
     let lost = |text: &str| {
-        xlsx_model::sheet_qualifier::remove_sheet_references(text, &removed_name, &order_before)
+        let sheets = xlsx_model::sheet_qualifier::remove_sheet_references(
+            text,
+            &removed_name,
+            &order_before,
+        );
+        crate::remap::remove_table_references(sheets.as_deref().unwrap_or(text), &dropped_tables)
+            .or(sheets)
     };
+    crate::remap::ensure_table_references_rewritable(wb, index, &dropped_tables)?;
     let cell_edits = crate::remap::removed_sheet_cell_edits(wb, index, &lost)?;
     let formats = crate::remap::rewritten_conditional_formats(
         wb,
         Some(index),
-        &|formula| Ok(lost(formula).unwrap_or_else(|| formula.to_owned())),
+        &|formula| {
+            if crate::remap::names_unrewritable_table(formula, &dropped_tables) {
+                return Err(OpError::InvalidConditionalFormat(
+                    "a conditional format names a table on the deleted sheet in a form that cannot be rewritten".into(),
+                ));
+            }
+            Ok(lost(formula).unwrap_or_else(|| formula.to_owned()))
+        },
         &|text| lost(text).unwrap_or_else(|| text.to_owned()),
     )?;
     let previous_names = wb.defined_names.clone();
@@ -1901,6 +2010,14 @@ fn remove_sheet(wb: &mut Workbook, index: usize) -> Result<InvertedOp, OpError> 
     let removed = wb.sheets.remove(index);
     wb.defined_names = names;
     let previous_defined_names = (previous_names != wb.defined_names).then_some(previous_names);
+    let previous_tables = wb.tables.clone();
+    wb.tables.retain(|table| table.sheet.0 as usize != index);
+    for table in &mut wb.tables {
+        if table.sheet.0 as usize > index {
+            table.sheet = SheetId(table.sheet.0 - 1);
+        }
+    }
+    let previous_tables = (previous_tables != wb.tables).then_some(previous_tables);
     let after = |before: usize| SheetId((if before > index { before - 1 } else { before }) as u32);
     let mut reference_restores = Vec::new();
     for (before, at, formula, previous) in cell_edits {
@@ -2008,6 +2125,9 @@ fn remove_sheet(wb: &mut Workbook, index: usize) -> Result<InvertedOp, OpError> 
     if let Some(defined_names) = previous_defined_names {
         inv.push(Op::SetDefinedNames { defined_names });
     }
+    if let Some(tables) = previous_tables {
+        inv.push(Op::SetTables { tables });
+    }
     inv.extend(chart_restores);
     inv.extend(reference_restores);
     Ok(InvertedOp(inv))
@@ -2024,6 +2144,15 @@ fn rebase_chart_restore(restore: Op, removed_index: usize) -> Op {
             charts,
         },
         other => other,
+    }
+}
+
+/// Keeps tables on their own sheets after a sheet is inserted at `index`.
+fn shift_tables(wb: &mut Workbook, index: usize) {
+    for table in &mut wb.tables {
+        if table.sheet.0 as usize >= index {
+            table.sheet = SheetId(table.sheet.0 + 1);
+        }
     }
 }
 

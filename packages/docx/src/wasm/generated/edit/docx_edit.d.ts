@@ -814,6 +814,14 @@ export class EditSession {
      */
     outline_glyph_json(font_id: number, glyph_id: number): string;
     /**
+     * The text each of `pages` shows in the retained layout, built or not, as
+     * `[{"pageIndex","paragraphs":[{"text","level"?,"inTable"?}]}]`: body
+     * paragraphs cut where the page cuts them, headings with their zero-based
+     * outline level, and the rows of tables the page places, cell by cell.
+     * Header rows a table repeats on later pages read only once.
+     */
+    page_texts_json(pages: Uint32Array): string;
+    /**
      * How many paragraphs of `story` carry `para_id`: 0, 1, or 2 for two or
      * more. Errors on an unknown story.
      */
@@ -839,9 +847,13 @@ export class EditSession {
     /**
      * Compact paragraph-position projection built in one story traversal:
      * `[{"paraId","length"}, …]` in document order, where `length` counts the
-     * UTF-16 text and inline embed units before that paragraph's pilcrow —
-     * exactly the `offset` domain of a Loc in it. One call replaces crossing
-     * the boundary once per paragraph. Errors on an unknown story.
+     * UTF-16 text, inline embed units and one unit per block embed (table,
+     * block content control) that leads the paragraph, before its pilcrow —
+     * exactly the `offset` domain of a Loc in it. In a paragraph that follows
+     * one table, offset 0 is before the table and the text starts at offset 1;
+     * each further leading table or block content control adds one.
+     * One call replaces crossing the boundary once per paragraph. Errors on an
+     * unknown story.
      */
     paragraph_spans(story: string): string;
     /**
@@ -896,6 +908,12 @@ export class EditSession {
      * "ok":false,"failure"}]}`. Listed entries keep their order; a kind expands in id order.
      */
     read_stories_json(request: string): string;
+    /**
+     * Adds to this replica's media sources every part of its own media table
+     * they lack, so it resolves the `data:` URLs seeding wrote whether or not
+     * it was seeded itself; `false` when nothing was added or it has no table.
+     */
+    rebuild_media_sources(): boolean;
     /**
      * Reconciles and publishes the `[owner, paraId]` pairs a save captured,
      * an owner being a session key or a source occurrence's
@@ -1379,6 +1397,12 @@ export class EditSession {
      */
     track_undo(): void;
     /**
+     * `[{"story","tableIndex"}]` from a full walk of the roots in `roots_json`, or `null` when
+     * a walk cannot finish.
+     * @internal
+     */
+    unavailable_tables_from(roots_json: string): string;
+    /**
      * Current undo grouping policy.
      */
     undo_capture_mode(): string;
@@ -1720,6 +1744,12 @@ export function serialize_docx_s11(request_json: string): string;
 export function serialize_docx_s12(request_json: string): string;
 
 /**
+ * Asks for heap counting. A wasm build with the counters always counts, so this only
+ * reports [`wasm_heap_counted`].
+ */
+export function set_wasm_heap_counting(on: boolean): boolean;
+
+/**
  * Caps the bytes allocated at once; an allocation past the cap fails. A
  * non-finite or negative value removes the cap.
  */
@@ -1919,6 +1949,7 @@ export interface InitOutput {
     readonly editsession_open_docx_preview: (a: number, b: number, c: number, d: number) => [number, number, number, number];
     readonly editsession_open_docx_preview_with_budget: (a: number, b: number, c: number, d: number, e: number) => [number, number, number, number];
     readonly editsession_outline_glyph_json: (a: number, b: number, c: number) => [number, number, number, number];
+    readonly editsession_page_texts_json: (a: number, b: number, c: number) => [number, number, number, number];
     readonly editsession_paragraph_id_count: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
     readonly editsession_paragraph_identities: (a: number) => [number, number, number, number];
     readonly editsession_paragraph_save_plan: (a: number) => [number, number, number, number];
@@ -1933,6 +1964,7 @@ export interface InitOutput {
     readonly editsession_proposal_revision_ranges_json: (a: number, b: number, c: number) => [number, number, number, number];
     readonly editsession_read_paragraphs_json: (a: number, b: number, c: number) => [number, number, number, number];
     readonly editsession_read_stories_json: (a: number, b: number, c: number) => [number, number, number, number];
+    readonly editsession_rebuild_media_sources: (a: number) => number;
     readonly editsession_record_saved_paragraph_ids: (a: number, b: number, c: number) => [number, number, number, number];
     readonly editsession_redo: (a: number) => number;
     readonly editsession_register_measure_font: (a: number, b: number, c: number) => [number, number, number];
@@ -2016,6 +2048,7 @@ export interface InitOutput {
     readonly editsession_take_base_latin_miss: (a: number) => number;
     readonly editsession_toggle_mark: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number) => [number, number, number, number];
     readonly editsession_track_undo: (a: number) => void;
+    readonly editsession_unavailable_tables_from: (a: number, b: number, c: number) => [number, number, number, number];
     readonly editsession_undo: (a: number) => number;
     readonly editsession_undo_capture_mode: (a: number) => [number, number];
     readonly editsession_update_comment_metadata_json: (a: number, b: number, c: number, d: number, e: number) => [number, number];
@@ -2074,6 +2107,7 @@ export interface InitOutput {
     readonly serialize_docx_s10: (a: number, b: number) => [number, number, number, number];
     readonly serialize_docx_s11: (a: number, b: number) => [number, number, number, number];
     readonly serialize_docx_s12: (a: number, b: number) => [number, number, number, number];
+    readonly set_wasm_heap_counting: (a: number) => number;
     readonly set_wasm_heap_limit: (a: number) => void;
     readonly unzip_docx: (a: number, b: number) => [number, number, number];
     readonly update_display_list: (a: number, b: number, c: number) => [number, number];
