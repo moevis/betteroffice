@@ -4,7 +4,7 @@
 use ooxml_drawingml::GeometryPathCommand;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use xlsx_model::PatternType;
+use xlsx_model::{PatternType, RunUnderline};
 
 /// horizontal text anchoring within a cell's clip rect.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -116,6 +116,9 @@ pub enum DrawCmd {
         italic: bool,
         #[serde(default, skip_serializing_if = "is_false")]
         underline: bool,
+        /// The kind of `underline` when it is not single.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        underline_style: Option<RunUnderline>,
         #[serde(default, skip_serializing_if = "is_false")]
         strike: bool,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -227,6 +230,9 @@ pub struct ChartRegion {
     pub clip: Rect,
     /// whether the anchor can be repinned; an absolute one cannot.
     pub movable: bool,
+    /// whether the anchor can be resized. A two-cell anchor writes both
+    /// corners back, so it can; a one-cell extent never is.
+    pub resizable: bool,
 }
 
 /// former name of [`ChartRegion`], when it carried the label alone.
@@ -344,6 +350,7 @@ pub fn scaled(dl: DisplayList, factor: f32) -> DisplayList {
                 bold,
                 italic,
                 underline,
+                underline_style,
                 strike,
                 highlight,
                 dashed_underline,
@@ -367,6 +374,7 @@ pub fn scaled(dl: DisplayList, factor: f32) -> DisplayList {
                 bold,
                 italic,
                 underline,
+                underline_style,
                 strike,
                 highlight,
                 dashed_underline,
@@ -433,6 +441,7 @@ pub fn scaled(dl: DisplayList, factor: f32) -> DisplayList {
                 rect: scale_rect(chart.rect, factor),
                 clip: scale_rect(chart.clip, factor),
                 movable: chart.movable,
+                resizable: chart.resizable,
             })
             .collect(),
     }
@@ -564,6 +573,7 @@ mod tests {
                     bold: false,
                     italic: false,
                     underline: false,
+                    underline_style: None,
                     strike: false,
                     highlight: None,
                     dashed_underline: false,
@@ -616,6 +626,7 @@ mod tests {
                     h: 40.0,
                 },
                 movable: true,
+                resizable: true,
             }],
         }
     }

@@ -114,14 +114,6 @@
     "zoomPercent": "Zoom en porcentaje",
     "apply": "Aplicar",
     "cancel": "Cancelar",
-    "freezeColumn": "Inmovilizar columna {column}",
-    "freezeColumns": "Inmovilizar columnas {first}–{last}",
-    "freezeRow": "Inmovilizar fila {row}",
-    "freezeRows": "Inmovilizar filas {first}–{last}",
-    "unfreezePanes": "Desmovilizar paneles",
-    "unhideColumns": "Mostrar columnas",
-    "unhideRows": "Mostrar filas",
-    "selectAll": "Seleccionar todo",
     "reasons": {
       "editorUnavailable": "El editor no está listo.",
       "documentLoading": "El libro aún se está abriendo.",
@@ -147,6 +139,7 @@
       "editUnsupportedChart": "Esta edición no se puede aplicar: un gráfico usa celdas que movería. El libro no ha cambiado.",
       "editUnsupportedTable": "Esta edición no se puede aplicar: una tabla usa celdas que movería. El libro no ha cambiado.",
       "editUnsupportedPivot": "Esta edición no se puede aplicar: una tabla dinámica usa celdas que movería. El libro no ha cambiado.",
+      "editUnsupportedFill": "Este relleno no se puede aplicar: cambiaría celdas con vínculos, notas o reglas. El libro no ha cambiado.",
       "sheetProtected": "Esta celda está en una hoja protegida.",
       "hostRefused": "Esta edición no está permitida.",
       "tooManyToCheck": "Demasiadas celdas para que los complementos las comprueben (límite {limit}).",
@@ -166,9 +159,7 @@
       "lastSheet": "Un libro necesita al menos una hoja.",
       "sheetAtEdge": "La hoja no se puede mover más.",
       "sheetNameInvalid": "Los nombres de hoja necesitan de 1 a 31 caracteres, deben ser únicos y no pueden contener : \\ / ? * [ ].",
-      "clipboardDenied": "El navegador no permitió el acceso al portapapeles.",
-      "clipboardInsecure": "El portapapeles necesita una página segura (HTTPS).",
-      "clipboardWriteUnavailable": "Este navegador no permite copiar al portapapeles."
+      "clipboardDenied": "El navegador no permitió el acceso al portapapeles."
     },
     "cut": "Cortar",
     "copy": "Copiar",
@@ -204,8 +195,6 @@
     "sheetTabsLabel": "Hojas",
     "clearExceedsLimit": "Borrar supera el límite de celdas.",
     "cellMenuLabel": "Menú de celda",
-    "columnHeaderMenuLabel": "Menú del encabezado de columna",
-    "rowHeaderMenuLabel": "Menú del encabezado de fila",
     "sheetTabMenuLabel": "Menú de la pestaña de hoja",
     "renameSheetLabel": "Cambiar nombre de la hoja",
     "sheetNamePrefix": "Hoja"
@@ -240,7 +229,18 @@
     "sheetActivated": "{name}, hoja {index} de {count}",
     "cellInputLabel": "Editar celda {address}",
     "gridRoleDescription": "hoja de cálculo",
-    "fillHandleLabel": "Controlador de relleno"
+    "fillHandleLabel": "Controlador de relleno",
+    "chartResizeNw": "Cambiar el tamaño del gráfico desde la esquina superior izquierda",
+    "chartResizeN": "Cambiar el tamaño del gráfico desde el borde superior",
+    "chartResizeNe": "Cambiar el tamaño del gráfico desde la esquina superior derecha",
+    "chartResizeE": "Cambiar el tamaño del gráfico desde el borde derecho",
+    "chartResizeSe": "Cambiar el tamaño del gráfico desde la esquina inferior derecha",
+    "chartResizeS": "Cambiar el tamaño del gráfico desde el borde inferior",
+    "chartResizeSw": "Cambiar el tamaño del gráfico desde la esquina inferior izquierda",
+    "chartResizeW": "Cambiar el tamaño del gráfico desde el borde izquierdo",
+    "chartResizeHintBoth": "{label} (teclas de flecha; mantén Mayús para 10 px)",
+    "chartResizeHintHorizontal": "{label} (flechas izquierda y derecha; mantén Mayús para 10 px)",
+    "chartResizeHintVertical": "{label} (flechas arriba y abajo; mantén Mayús para 10 px)"
   },
   "plugins": {
     "toolbarGroup": "Complementos",

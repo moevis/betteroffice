@@ -114,14 +114,6 @@
     "zoomPercent": "التكبير بالنسبة المئوية",
     "apply": "تطبيق",
     "cancel": "إلغاء",
-    "freezeColumn": "تجميد العمود {column}",
-    "freezeColumns": "تجميد الأعمدة {first}–{last}",
-    "freezeRow": "تجميد الصف {row}",
-    "freezeRows": "تجميد الصفوف {first}–{last}",
-    "unfreezePanes": "إلغاء تجميد الأجزاء",
-    "unhideColumns": "إظهار الأعمدة",
-    "unhideRows": "إظهار الصفوف",
-    "selectAll": "تحديد الكل",
     "reasons": {
       "editorUnavailable": "المحرر غير جاهز.",
       "documentLoading": "ما زال المصنف يُفتح.",
@@ -147,6 +139,7 @@
       "editUnsupportedChart": "لا يمكن تطبيق هذا التعديل: يستخدم مخطط خلايا سينقلها التعديل. لم يتغير المصنف.",
       "editUnsupportedTable": "لا يمكن تطبيق هذا التعديل: يستخدم جدول خلايا سينقلها التعديل. لم يتغير المصنف.",
       "editUnsupportedPivot": "لا يمكن تطبيق هذا التعديل: يستخدم جدول محوري خلايا سينقلها التعديل. لم يتغير المصنف.",
+      "editUnsupportedFill": "لا يمكن تطبيق هذه التعبئة: ستغيّر خلايا تحتوي على ارتباطات أو ملاحظات أو قواعد. لم يتغير المصنف.",
       "sheetProtected": "هذه الخلية في ورقة محمية.",
       "hostRefused": "هذا التعديل غير مسموح به.",
       "tooManyToCheck": "عدد الخلايا كبير جدًا بحيث لا يمكن للإضافات التحقق منها (الحد {limit}).",
@@ -166,9 +159,7 @@
       "lastSheet": "يحتاج المصنف إلى ورقة واحدة على الأقل.",
       "sheetAtEdge": "لا يمكن نقل الورقة أبعد من ذلك.",
       "sheetNameInvalid": "يجب أن يتكون اسم الورقة من 1 إلى 31 حرفًا وأن يكون فريدًا ولا يحتوي على : \\ / ? * [ ].",
-      "clipboardDenied": "لم يسمح المتصفح بالوصول إلى الحافظة.",
-      "clipboardInsecure": "تحتاج الحافظة إلى صفحة آمنة (HTTPS).",
-      "clipboardWriteUnavailable": "لا يسمح هذا المتصفح بالنسخ إلى الحافظة."
+      "clipboardDenied": "لم يسمح المتصفح بالوصول إلى الحافظة."
     },
     "cut": "قص",
     "copy": "نسخ",
@@ -204,8 +195,6 @@
     "sheetTabsLabel": "الأوراق",
     "clearExceedsLimit": "المسح يتجاوز حد الخلايا",
     "cellMenuLabel": "قائمة الخلية",
-    "columnHeaderMenuLabel": "قائمة رأس العمود",
-    "rowHeaderMenuLabel": "قائمة رأس الصف",
     "sheetTabMenuLabel": "قائمة علامة تبويب الورقة",
     "renameSheetLabel": "إعادة تسمية الورقة",
     "sheetNamePrefix": "ورقة عمل"
@@ -240,7 +229,18 @@
     "sheetActivated": "{name}، ورقة عمل {index} من {count}",
     "cellInputLabel": "تحرير الخلية {address}",
     "gridRoleDescription": "ورقة عمل",
-    "fillHandleLabel": "مقبض التعبئة"
+    "fillHandleLabel": "مقبض التعبئة",
+    "chartResizeNw": "تغيير حجم المخطط من الزاوية العلوية اليسرى",
+    "chartResizeN": "تغيير حجم المخطط من الحافة العلوية",
+    "chartResizeNe": "تغيير حجم المخطط من الزاوية العلوية اليمنى",
+    "chartResizeE": "تغيير حجم المخطط من الحافة اليمنى",
+    "chartResizeSe": "تغيير حجم المخطط من الزاوية السفلية اليمنى",
+    "chartResizeS": "تغيير حجم المخطط من الحافة السفلية",
+    "chartResizeSw": "تغيير حجم المخطط من الزاوية السفلية اليسرى",
+    "chartResizeW": "تغيير حجم المخطط من الحافة اليسرى",
+    "chartResizeHintBoth": "{label} (مفاتيح الأسهم؛ اضغط باستمرار على Shift للتغيير بمقدار 10 بكسل)",
+    "chartResizeHintHorizontal": "{label} (السهمان الأيسر والأيمن؛ اضغط باستمرار على Shift للتغيير بمقدار 10 بكسل)",
+    "chartResizeHintVertical": "{label} (السهمان لأعلى ولأسفل؛ اضغط باستمرار على Shift للتغيير بمقدار 10 بكسل)"
   },
   "plugins": {
     "toolbarGroup": "المكونات الإضافية",

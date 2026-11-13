@@ -114,14 +114,6 @@
     "zoomPercent": "缩放百分比",
     "apply": "应用",
     "cancel": "取消",
-    "freezeColumn": "冻结 {column} 列",
-    "freezeColumns": "冻结 {first}–{last} 列",
-    "freezeRow": "冻结第 {row} 行",
-    "freezeRows": "冻结第 {first}–{last} 行",
-    "unfreezePanes": "取消冻结窗格",
-    "unhideColumns": "取消隐藏列",
-    "unhideRows": "取消隐藏行",
-    "selectAll": "全选",
     "reasons": {
       "editorUnavailable": "编辑器尚未就绪。",
       "documentLoading": "工作簿仍在打开。",
@@ -147,6 +139,7 @@
       "editUnsupportedChart": "无法应用此编辑：图表使用了此编辑会移动的单元格。工作簿未更改。",
       "editUnsupportedTable": "无法应用此编辑：表格使用了此编辑会移动的单元格。工作簿未更改。",
       "editUnsupportedPivot": "无法应用此编辑：数据透视表使用了此编辑会移动的单元格。工作簿未更改。",
+      "editUnsupportedFill": "无法应用此填充：它会更改包含链接、批注或规则的单元格。工作簿未更改。",
       "sheetProtected": "此单元格位于受保护的工作表上。",
       "hostRefused": "不允许此编辑。",
       "tooManyToCheck": "单元格过多，插件无法检查（上限 {limit}）。",
@@ -166,9 +159,7 @@
       "lastSheet": "工作簿至少需要一个工作表。",
       "sheetAtEdge": "无法再移动此工作表。",
       "sheetNameInvalid": "工作表名称需为 1 到 31 个字符，不能重复，且不能包含 : \\ / ? * [ ]。",
-      "clipboardDenied": "浏览器不允许访问剪贴板。",
-      "clipboardInsecure": "剪贴板需要安全 (HTTPS) 页面。",
-      "clipboardWriteUnavailable": "此浏览器不允许复制到剪贴板。"
+      "clipboardDenied": "浏览器不允许访问剪贴板。"
     },
     "cut": "剪切",
     "copy": "复制",
@@ -204,8 +195,6 @@
     "sheetTabsLabel": "工作表",
     "clearExceedsLimit": "清除操作超出单元格上限",
     "cellMenuLabel": "单元格菜单",
-    "columnHeaderMenuLabel": "列头菜单",
-    "rowHeaderMenuLabel": "行头菜单",
     "sheetTabMenuLabel": "工作表标签菜单",
     "renameSheetLabel": "重命名工作表",
     "sheetNamePrefix": "工作表"
@@ -240,7 +229,18 @@
     "sheetActivated": "{name}，第 {index} 个工作表，共 {count} 个",
     "cellInputLabel": "编辑单元格 {address}",
     "gridRoleDescription": "工作表",
-    "fillHandleLabel": "填充柄"
+    "fillHandleLabel": "填充柄",
+    "chartResizeNw": "从左上角调整图表大小",
+    "chartResizeN": "从上边缘调整图表大小",
+    "chartResizeNe": "从右上角调整图表大小",
+    "chartResizeE": "从右边缘调整图表大小",
+    "chartResizeSe": "从右下角调整图表大小",
+    "chartResizeS": "从下边缘调整图表大小",
+    "chartResizeSw": "从左下角调整图表大小",
+    "chartResizeW": "从左边缘调整图表大小",
+    "chartResizeHintBoth": "{label}（方向键；按住 Shift 键每次 10 像素）",
+    "chartResizeHintHorizontal": "{label}（左右方向键；按住 Shift 键每次 10 像素）",
+    "chartResizeHintVertical": "{label}（上下方向键；按住 Shift 键每次 10 像素）"
   },
   "plugins": {
     "toolbarGroup": "插件",

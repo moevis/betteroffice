@@ -1,13 +1,17 @@
 import { memo, useCallback, useEffect, useMemo, useSyncExternalStore } from 'react';
-import type { CSSProperties, ReactNode } from 'react';
+import type { CSSProperties, PointerEvent as ReactPointerEvent, ReactNode } from 'react';
 import { buildA11yGrid, cellRect, normalizeRange, rangeRect } from '@betteroffice/xlsx';
 import type { CellAddr, CellRange, WorkbookSheetSummary } from '@betteroffice/xlsx';
 import type { CollaborationAwareness } from '@betteroffice/xlsx/collaboration';
 import { useTranslation } from '../i18n';
-import { expandRangeToMergedCells, scaledRect } from '../viewer/sessionGeometry';
+import { coversWholeTrack, deriveLimits, expandRangeToMergedCells, scaledRect } from '../viewer/sessionGeometry';
 import { FillHandle, fillHandleAnchor } from '../components/FillHandle';
 import { PeerlessWorkerCellInput, usePeerlessReadOnly } from './PeerlessWorkerInputs';
 import { cellEditorColors } from '../viewer/cellEditorColors';
+import { frozenGridExtent } from '../plugins/geometry';
+import { chartResizeRect, chartResizeSpace, type ChartDragPreview, type ChartResizeHandle,
+  type SelectedChart } from './chartResize';
+import { ChartResizeHandles } from './ChartResizeHandles';
 import type { PeerlessWorkbookSession } from './usePeerlessSessionWorkbook';
 import type { WorkerDraftController } from './WorkerDraftController';
 import { WorkerPresentationStore, useWorkerPresentation } from './WorkerPresentationStore';
@@ -58,17 +62,23 @@ export const PeerlessWorkerExtent = memo(function PeerlessWorkerExtent({ store, 
 });
 
 export const PeerlessWorkerOverlay = memo(function PeerlessWorkerOverlay({ store, active, zoom, selectedChart,
-  chartOffset, controller, disabled, run, onFill, cellAt }: {
+  chartPreview, chartSheetExtent, onResizeStart, onResizeNudge, controller, disabled, run,
+  onFill, cellAt, fillHandle }: {
   store: WorkerPresentationStore;
   active: number;
   zoom: number;
-  selectedChart: { id: string; movable: boolean } | null;
-  chartOffset: { x: number; y: number } | null;
+  selectedChart: SelectedChart | null;
+  chartPreview: ChartDragPreview | null;
+  /** worksheet extent in content pixels, used to clamp the resize preview. */
+  chartSheetExtent: { width: number; height: number } | null;
+  onResizeStart: (handle: ChartResizeHandle, event: ReactPointerEvent<HTMLElement>) => void;
+  onResizeNudge: (handle: ChartResizeHandle, dx: number, dy: number) => void;
   controller: WorkerDraftController;
   disabled: boolean;
   run: PeerlessWorkbookSession | null;
   onFill?(source: CellRange, destination: CellRange): void;
   cellAt?(clientX: number, clientY: number): CellAddr | null;
+  fillHandle?: boolean;
 }) {
   const unavailable = usePeerlessReadOnly(run, disabled);
   const { t } = useTranslation();
@@ -76,6 +86,7 @@ export const PeerlessWorkerOverlay = memo(function PeerlessWorkerOverlay({ store
   const drafting = draftState.cell !== null || draftState.formula !== null;
   const painted = useWorkerPresentation(store, selectPainted);
   const selection = useWorkerPresentation(store, selectSelection);
+  const view = useWorkerPresentation(store, selectView);
   const scale = painted?.request.zoom ?? zoom;
   const visible = painted?.request.sheet === active ? selection : null;
   const grid = painted?.displayList.grid;
@@ -89,11 +100,26 @@ export const PeerlessWorkerOverlay = memo(function PeerlessWorkerOverlay({ store
   const focused = visible ? expandRangeToMergedCells({ top: visible.anchor.row, left: visible.anchor.col,
     bottom: visible.anchor.row, right: visible.anchor.col }, painted?.mergedRanges ?? []) : null;
   const focusRect = grid && focused ? rangeRect(grid, focused) : null;
-  const chartRect = selectedChart ? painted?.displayList.charts?.find((chart) => chart.id === selectedChart.id)?.rect : null;
   const fillRect = (range: CellRange) => {
     const bounds = grid ? rangeRect(grid, range) : null;
     return bounds ? scaledRect(bounds, scale) : null;
   };
+  const chartRegion = selectedChart
+    ? painted?.displayList.charts?.find((chart) => chart.id === selectedChart.id) ?? null : null;
+  const chartFrozen = painted && view
+    ? frozenGridExtent(painted.displayList.grid, view.frozenRows, view.frozenCols) : null;
+  const chartSpace = chartRegion && painted && view ? chartResizeSpace(chartRegion, {
+    x: painted.request.viewport.x, y: painted.request.viewport.y,
+    frozenRows: view.frozenRows, frozenCols: view.frozenCols,
+    frozenWidth: chartFrozen?.width, frozenHeight: chartFrozen?.height,
+    sheetWidth: chartSheetExtent?.width, sheetHeight: chartSheetExtent?.height,
+  }) : undefined;
+  const shownChart = chartRegion && chartPreview?.kind === 'resize'
+    ? chartResizeRect(chartRegion.rect, chartPreview.handle, chartPreview.dx, chartPreview.dy, chartSpace)
+    : chartRegion?.rect ?? null;
+  const showHandles = shownChart && selectedChart?.movable && selectedChart.resizable && !selectedChart.placeholder &&
+    !unavailable && chartPreview?.kind !== 'move';
+  const scaledChart = shownChart ? scaledRect(shownChart, scale) : null;
   const rect = useCallback((row: number, col: number, sheet: number) =>
     painted?.geometry && painted.request.sheet === sheet ? cellRect(painted.geometry, row, col) : null, [painted]);
   const colors = useCallback((sheet: number, bounds: { x: number; y: number; w: number; h: number }) =>
@@ -123,15 +149,19 @@ export const PeerlessWorkerOverlay = memo(function PeerlessWorkerOverlay({ store
         background: SELECTION_FILL }} />)}
     {selectionRect && !selectedChart && <div data-testid="xlsx-selection"
       style={marquee(selectionRect)} />}
-    {!unavailable && !selectedChart && !drafting && fillHandleRect && expanded && onFill && cellAt && (
+    {fillHandle && !unavailable && !selectedChart && !drafting && fillHandleRect && expanded && onFill && cellAt &&
+      !coversWholeTrack(expanded, deriveLimits(painted?.displayList ?? null, 0)) && (
       <FillHandle rect={fillHandleRect} source={expanded}
         rectForRange={fillRect} cellAt={cellAt} onFill={onFill}
         ariaLabel={t('a11y.fillHandleLabel')} />
     )}
     {focusRect && !selectedChart && <div data-testid="xlsx-active-cell"
       style={marquee(focusRect, ACTIVE_CELL_WIDTH)} />}
-    {chartRect && <div data-testid="xlsx-chart-selection" data-chart-id={selectedChart?.id} aria-hidden
-      style={{ ...outline(chartRect, '#217346'), transform: `translate(${chartOffset?.x ?? 0}px, ${chartOffset?.y ?? 0}px)` }} />}
+    {shownChart && <div data-testid="xlsx-chart-selection" data-chart-id={selectedChart?.id} aria-hidden
+      style={{ ...outline(shownChart, '#217346'), ...(chartPreview?.kind === 'move'
+        ? { transform: `translate(${chartPreview.x}px, ${chartPreview.y}px)` } : {}) }} />}
+    {showHandles && scaledChart && <ChartResizeHandles rect={scaledChart}
+      onStart={onResizeStart} onNudge={onResizeNudge} />}
     <PeerlessWorkerCellInput controller={controller} zoom={scale} disabled={unavailable} rect={rect} colors={colors} />
   </div>;
 });

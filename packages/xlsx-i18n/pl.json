@@ -114,14 +114,6 @@
     "zoomPercent": "Powiększenie w procentach",
     "apply": "Zastosuj",
     "cancel": "Anuluj",
-    "freezeColumn": "Zablokuj kolumnę {column}",
-    "freezeColumns": "Zablokuj kolumny {first}–{last}",
-    "freezeRow": "Zablokuj wiersz {row}",
-    "freezeRows": "Zablokuj wiersze {first}–{last}",
-    "unfreezePanes": "Odblokuj okienka",
-    "unhideColumns": "Pokaż kolumny",
-    "unhideRows": "Pokaż wiersze",
-    "selectAll": "Zaznacz wszystko",
     "reasons": {
       "editorUnavailable": "Edytor nie jest gotowy.",
       "documentLoading": "Skoroszyt jest jeszcze otwierany.",
@@ -147,6 +139,7 @@
       "editUnsupportedChart": "Tej zmiany nie można zastosować: wykres używa komórek, które zostałyby przesunięte. Skoroszyt nie został zmieniony.",
       "editUnsupportedTable": "Tej zmiany nie można zastosować: tabela używa komórek, które zostałyby przesunięte. Skoroszyt nie został zmieniony.",
       "editUnsupportedPivot": "Tej zmiany nie można zastosować: tabela przestawna używa komórek, które zostałyby przesunięte. Skoroszyt nie został zmieniony.",
+      "editUnsupportedFill": "Tego wypełnienia nie można zastosować: zmieniłoby komórki z linkami, notatkami lub regułami. Skoroszyt nie został zmieniony.",
       "sheetProtected": "Ta komórka znajduje się w chronionym arkuszu.",
       "hostRefused": "Ta zmiana jest niedozwolona.",
       "tooManyToCheck": "Za dużo komórek do sprawdzenia przez wtyczki (limit {limit}).",
@@ -166,9 +159,7 @@
       "lastSheet": "Skoroszyt musi mieć co najmniej jeden arkusz.",
       "sheetAtEdge": "Arkusza nie można przenieść dalej.",
       "sheetNameInvalid": "Nazwy arkuszy muszą mieć od 1 do 31 znaków, być unikatowe i nie mogą zawierać : \\ / ? * [ ].",
-      "clipboardDenied": "Przeglądarka nie zezwoliła na dostęp do schowka.",
-      "clipboardInsecure": "Schowek wymaga bezpiecznej strony (HTTPS).",
-      "clipboardWriteUnavailable": "Ta przeglądarka nie pozwala kopiować do schowka."
+      "clipboardDenied": "Przeglądarka nie zezwoliła na dostęp do schowka."
     },
     "cut": "Wytnij",
     "copy": "Kopiuj",
@@ -204,8 +195,6 @@
     "sheetTabsLabel": "Arkusze",
     "clearExceedsLimit": "Czyszczenie przekracza limit komórek.",
     "cellMenuLabel": "Menu komórki",
-    "columnHeaderMenuLabel": "Menu nagłówka kolumny",
-    "rowHeaderMenuLabel": "Menu nagłówka wiersza",
     "sheetTabMenuLabel": "Menu karty arkusza",
     "renameSheetLabel": "Zmień nazwę arkusza",
     "sheetNamePrefix": "Arkusz"
@@ -240,7 +229,18 @@
     "sheetActivated": "{name}, arkusz {index} z {count}",
     "cellInputLabel": "Edytuj komórkę {address}",
     "gridRoleDescription": "arkusz",
-    "fillHandleLabel": "Uchwyt wypełniania"
+    "fillHandleLabel": "Uchwyt wypełniania",
+    "chartResizeNw": "Zmień rozmiar wykresu od lewego górnego rogu",
+    "chartResizeN": "Zmień rozmiar wykresu od górnej krawędzi",
+    "chartResizeNe": "Zmień rozmiar wykresu od prawego górnego rogu",
+    "chartResizeE": "Zmień rozmiar wykresu od prawej krawędzi",
+    "chartResizeSe": "Zmień rozmiar wykresu od prawego dolnego rogu",
+    "chartResizeS": "Zmień rozmiar wykresu od dolnej krawędzi",
+    "chartResizeSw": "Zmień rozmiar wykresu od lewego dolnego rogu",
+    "chartResizeW": "Zmień rozmiar wykresu od lewej krawędzi",
+    "chartResizeHintBoth": "{label} (klawisze strzałek; przytrzymaj Shift, aby zmienić o 10 px)",
+    "chartResizeHintHorizontal": "{label} (strzałki w lewo i w prawo; przytrzymaj Shift, aby zmienić o 10 px)",
+    "chartResizeHintVertical": "{label} (strzałki w górę i w dół; przytrzymaj Shift, aby zmienić o 10 px)"
   },
   "plugins": {
     "toolbarGroup": "Wtyczki",

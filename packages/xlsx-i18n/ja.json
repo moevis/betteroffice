@@ -114,14 +114,6 @@
     "zoomPercent": "パーセント単位のズーム",
     "apply": "適用",
     "cancel": "キャンセル",
-    "freezeColumn": "列 {column} を固定",
-    "freezeColumns": "列 {first}–{last} を固定",
-    "freezeRow": "行 {row} を固定",
-    "freezeRows": "行 {first}–{last} を固定",
-    "unfreezePanes": "ウィンドウ枠の固定を解除",
-    "unhideColumns": "列の再表示",
-    "unhideRows": "行の再表示",
-    "selectAll": "すべて選択",
     "reasons": {
       "editorUnavailable": "エディターの準備ができていません。",
       "documentLoading": "ブックを開いています。",
@@ -147,6 +139,7 @@
       "editUnsupportedChart": "この編集は適用できません。移動されるセルをグラフが使用しています。ブックは変更されていません。",
       "editUnsupportedTable": "この編集は適用できません。移動されるセルをテーブルが使用しています。ブックは変更されていません。",
       "editUnsupportedPivot": "この編集は適用できません。移動されるセルをピボットテーブルが使用しています。ブックは変更されていません。",
+      "editUnsupportedFill": "このフィルは適用できません。リンク、メモ、またはルールのあるセルが変更されます。ブックは変更されていません。",
       "sheetProtected": "このセルは保護されたシート上にあります。",
       "hostRefused": "この編集は許可されていません。",
       "tooManyToCheck": "プラグインが確認できるセル数を超えています（上限 {limit}）。",
@@ -166,9 +159,7 @@
       "lastSheet": "ブックには少なくとも 1 つのシートが必要です。",
       "sheetAtEdge": "シートをこれ以上移動できません。",
       "sheetNameInvalid": "シート名は 1～31 文字で一意である必要があり、: \\ / ? * [ ] は使用できません。",
-      "clipboardDenied": "ブラウザーでクリップボードへのアクセスが許可されませんでした。",
-      "clipboardInsecure": "クリップボードには安全な (HTTPS) ページが必要です。",
-      "clipboardWriteUnavailable": "このブラウザーではクリップボードにコピーできません。"
+      "clipboardDenied": "ブラウザーでクリップボードへのアクセスが許可されませんでした。"
     },
     "cut": "切り取り",
     "copy": "コピー",
@@ -204,8 +195,6 @@
     "sheetTabsLabel": "シート",
     "clearExceedsLimit": "クリアがセルの上限を超えています",
     "cellMenuLabel": "セル メニュー",
-    "columnHeaderMenuLabel": "列見出しメニュー",
-    "rowHeaderMenuLabel": "行見出しメニュー",
     "sheetTabMenuLabel": "シート見出しメニュー",
     "renameSheetLabel": "シート名の変更",
     "sheetNamePrefix": "シート"
@@ -240,7 +229,18 @@
     "sheetActivated": "{name}、シート {index}/{count}",
     "cellInputLabel": "セル {address} を編集",
     "gridRoleDescription": "ワークシート",
-    "fillHandleLabel": "フィルハンドル"
+    "fillHandleLabel": "フィルハンドル",
+    "chartResizeNw": "左上隅からグラフのサイズを変更",
+    "chartResizeN": "上端からグラフのサイズを変更",
+    "chartResizeNe": "右上隅からグラフのサイズを変更",
+    "chartResizeE": "右端からグラフのサイズを変更",
+    "chartResizeSe": "右下隅からグラフのサイズを変更",
+    "chartResizeS": "下端からグラフのサイズを変更",
+    "chartResizeSw": "左下隅からグラフのサイズを変更",
+    "chartResizeW": "左端からグラフのサイズを変更",
+    "chartResizeHintBoth": "{label} (方向キー、Shift キーを押しながらで 10 px)",
+    "chartResizeHintHorizontal": "{label} (左右の方向キー、Shift キーを押しながらで 10 px)",
+    "chartResizeHintVertical": "{label} (上下の方向キー、Shift キーを押しながらで 10 px)"
   },
   "plugins": {
     "toolbarGroup": "プラグイン",

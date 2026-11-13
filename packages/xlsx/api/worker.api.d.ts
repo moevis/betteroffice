@@ -23,6 +23,17 @@ export interface ChartInfo {
     richTitle: boolean;
     series: ChartSeriesInfo[];
 }
+/**
+ * How far each edge of a chart frame moves, in content pixels: a positive
+ * value moves the left or right edge right and the top or bottom edge down.
+ * The engine computes the new anchor and clamps the result to the grid.
+ */
+export interface ChartResizeEdges {
+    left: number;
+    top: number;
+    right: number;
+    bottom: number;
+}
 export type ChartSeriesName = {
     text: string;
 } | {
@@ -347,6 +358,8 @@ export interface TextCmd {
     bold?: boolean;
     italic?: boolean;
     underline?: boolean;
+    /** The kind of `underline` when it is not single. */
+    underlineStyle?: 'double' | 'singleAccounting' | 'doubleAccounting';
     strike?: boolean;
     highlight?: string;
     dashedUnderline?: boolean;
@@ -449,6 +462,8 @@ export interface ChartRegion {
     clip: Rect;
     /** whether the anchor can be repinned; an absolute one cannot. */
     movable: boolean;
+    /** whether the anchor can be resized. A two-cell anchor writes both corners back, so it can. */
+    resizable: boolean;
 }
 /** Former name of {@link ChartRegion}, when it carried the label alone. */
 export type ChartA11yAttrs = ChartRegion;
@@ -1695,6 +1710,7 @@ export declare const WORKBOOK_REPLAY_MUTATORS: {
     setNumberFormat: true;
     applyFormat: true;
     moveChart: true;
+    resizeChart: true;
     moveRange: true;
     undo: true;
     redo: true;
@@ -2742,11 +2758,46 @@ export interface PngUnavailablePicture {
     actual?: number;
     unit?: 'pixels' | 'bytes' | 'work';
 }
-/** A problem a PNG export worked around: the page still exports. */
-export interface PngDiagnostic {
+/**
+ * The kinds of effect a PNG export can leave off a page:
+ * - `text.outline`: a run's classic hollow outline.
+ * - `text.emphasisMark`: the dots, commas or circles marking emphasised characters.
+ * - `text.effect`: a legacy animated text effect such as a blinking background.
+ * - `text.modernEffects`: a run's glow, shadow, reflection, fill or outline text effects.
+ * - `text.shadow`: a run's classic shadow, emboss or engrave.
+ * - `text.leaderGlyphs`: the dots or dashes a tab leader repeats.
+ * - `shape.effects`: a shape's effects, such as a soft edge or a second shadow.
+ * - `image.filter`: a picture's colour filter, such as a watermark washout.
+ * - `image.effects`: a picture's colour or blur effects.
+ *
+ * A page reports a kind when it carries at least one drawing primitive with an
+ * effect of that kind that the engine does not draw on its normal path. A
+ * picture whose bytes cannot be loaded or decoded reports `picture-unavailable`
+ * and nothing else. Kinds come in the order listed here.
+ *
+ * The report describes each engine's normal path, not the pixels of one page.
+ * A degenerate primitive that carries an effect, such as an empty crop, a run
+ * of spaces or a leader with no advance, still reports it.
+ */
+export declare const PNG_SKIPPED_EFFECT_KINDS: readonly ["text.outline", "text.emphasisMark", "text.effect", "text.modernEffects", "text.shadow", "text.leaderGlyphs", "shape.effects", "image.filter", "image.effects"];
+export type PngSkippedEffectKind = (typeof PNG_SKIPPED_EFFECT_KINDS)[number];
+/** Pictures a PNG export drew as a placeholder. */
+export interface PngPictureUnavailableDiagnostic {
     code: 'picture-unavailable';
     pictures: PngUnavailablePicture[];
 }
+/**
+ * Effects a PNG export left off a page, sent at most once per page and only
+ * when `effects` is not empty. `page` is zero-based, as the export target is.
+ * `effects` names each kind once, in {@link PNG_SKIPPED_EFFECT_KINDS} order.
+ */
+export interface PngEffectsSkippedDiagnostic {
+    code: 'effects-skipped';
+    page: number;
+    effects: PngSkippedEffectKind[];
+}
+/** A problem a PNG export worked around: the page still exports. */
+export type PngDiagnostic = PngPictureUnavailableDiagnostic | PngEffectsSkippedDiagnostic;
 
 // ---- shared/office-session/protocol.d.ts ----
 import type { SessionFailureCode } from './types';
@@ -3150,6 +3201,10 @@ export class XlsxDocument {
      */
     rejectProposalJson(args: string): string;
     /**
+     * move a chart's edges by pixel deltas as one undo step.
+     */
+    resizeChartJson(args: string): string;
+    /**
      * serialize the current workbook back to `.xlsx` bytes.
      */
     saveBytes(): Uint8Array;
@@ -3313,6 +3368,7 @@ export interface InitOutput {
     readonly xlsxdocument_recoveryCheckpoint: (a: number, b: number, c: number) => [number, number, number, number];
     readonly xlsxdocument_redoJson: (a: number) => [number, number, number, number];
     readonly xlsxdocument_rejectProposalJson: (a: number, b: number, c: number) => [number, number, number, number];
+    readonly xlsxdocument_resizeChartJson: (a: number, b: number, c: number) => [number, number, number, number];
     readonly xlsxdocument_saveBytes: (a: number) => [number, number, number, number];
     readonly xlsxdocument_saveWarningsJson: (a: number) => [number, number, number, number];
     readonly xlsxdocument_searchTextJson: (a: number, b: number, c: number) => [number, number, number, number];
@@ -3359,7 +3415,7 @@ export function initSync(module: { module: SyncInitInput } | SyncInitInput): Ini
 export default function __wbg_init (module_or_path?: { module_or_path: InitInput | Promise<InitInput> } | InitInput | Promise<InitInput>): Promise<InitOutput>;
 
 // ---- wasm/loader.d.ts ----
-import type { ChartInfo, ChartMutation } from '../charts';
+import type { ChartInfo, ChartMutation, ChartResizeEdges } from '../charts';
 /**
  * Wasm loader for the xlsx-wasm core.
  *
@@ -3561,6 +3617,7 @@ export interface CapturedCellFormat {
         bold?: boolean;
         italic?: boolean;
         underline?: boolean;
+        underline_style?: 'double' | 'singleAccounting' | 'doubleAccounting';
         strike?: boolean;
         color?: CapturedColor | null;
     };
@@ -3809,6 +3866,14 @@ export interface WorkbookHandle extends CollaborationReplica {
      * absolute anchor.
      */
     moveChart(sheet: number, chart: string, dx: number, dy: number): EditResult;
+    /**
+     * move the edges of the chart frame `chart` names — a {@link ChartRegion} id
+     * — by content-pixel deltas, clamped to the grid and a 1x1px minimum, as one
+     * undo step. the new two-cell anchor is written back on save. throws for a
+     * chart pinned by an absolute anchor or held by a one-cell extent, neither of
+     * which a save can rewrite.
+     */
+    resizeChart(sheet: number, chart: string, edges: ChartResizeEdges): EditResult;
     setActiveSheet(index: number): void;
     /**
      * apply one user input to a cell (parses number/bool/formula/text) and

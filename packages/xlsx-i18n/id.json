@@ -114,14 +114,6 @@
     "zoomPercent": "Zoom dalam persen",
     "apply": "Terapkan",
     "cancel": "Batal",
-    "freezeColumn": "Bekukan kolom {column}",
-    "freezeColumns": "Bekukan kolom {first}–{last}",
-    "freezeRow": "Bekukan baris {row}",
-    "freezeRows": "Bekukan baris {first}–{last}",
-    "unfreezePanes": "Batalkan pembekuan panel",
-    "unhideColumns": "Perlihatkan kolom",
-    "unhideRows": "Perlihatkan baris",
-    "selectAll": "Pilih semua",
     "reasons": {
       "editorUnavailable": "Editor belum siap.",
       "documentLoading": "Buku kerja masih dibuka.",
@@ -147,6 +139,7 @@
       "editUnsupportedChart": "Pengeditan ini tidak dapat diterapkan: sebuah bagan menggunakan sel yang akan dipindahkannya. Buku kerja tidak berubah.",
       "editUnsupportedTable": "Pengeditan ini tidak dapat diterapkan: sebuah tabel menggunakan sel yang akan dipindahkannya. Buku kerja tidak berubah.",
       "editUnsupportedPivot": "Pengeditan ini tidak dapat diterapkan: sebuah tabel pivot menggunakan sel yang akan dipindahkannya. Buku kerja tidak berubah.",
+      "editUnsupportedFill": "Isian ini tidak dapat diterapkan: isian akan mengubah sel yang memiliki tautan, catatan, atau aturan. Buku kerja tidak berubah.",
       "sheetProtected": "Sel ini berada di lembar yang dilindungi.",
       "hostRefused": "Pengeditan ini tidak diizinkan.",
       "tooManyToCheck": "Terlalu banyak sel untuk diperiksa plugin (batas {limit}).",
@@ -166,9 +159,7 @@
       "lastSheet": "Buku kerja memerlukan setidaknya satu lembar.",
       "sheetAtEdge": "Lembar tidak dapat dipindahkan lebih jauh.",
       "sheetNameInvalid": "Nama lembar harus 1 hingga 31 karakter, unik, dan tidak boleh berisi : \\ / ? * [ ].",
-      "clipboardDenied": "Browser tidak mengizinkan akses ke papan klip.",
-      "clipboardInsecure": "Papan klip memerlukan halaman aman (HTTPS).",
-      "clipboardWriteUnavailable": "Browser ini tidak mengizinkan penyalinan ke papan klip."
+      "clipboardDenied": "Browser tidak mengizinkan akses ke papan klip."
     },
     "cut": "Potong",
     "copy": "Salin",
@@ -204,8 +195,6 @@
     "sheetTabsLabel": "Lembar",
     "clearExceedsLimit": "Penghapusan melebihi batas sel",
     "cellMenuLabel": "Menu sel",
-    "columnHeaderMenuLabel": "Menu kepala kolom",
-    "rowHeaderMenuLabel": "Menu kepala baris",
     "sheetTabMenuLabel": "Menu tab lembar",
     "renameSheetLabel": "Ganti nama lembar",
     "sheetNamePrefix": "Lembar"
@@ -240,7 +229,18 @@
     "sheetActivated": "{name}, lembar {index} dari {count}",
     "cellInputLabel": "Edit sel {address}",
     "gridRoleDescription": "lembar kerja",
-    "fillHandleLabel": "Gagang isi"
+    "fillHandleLabel": "Gagang isi",
+    "chartResizeNw": "Ubah ukuran bagan dari sudut kiri atas",
+    "chartResizeN": "Ubah ukuran bagan dari tepi atas",
+    "chartResizeNe": "Ubah ukuran bagan dari sudut kanan atas",
+    "chartResizeE": "Ubah ukuran bagan dari tepi kanan",
+    "chartResizeSe": "Ubah ukuran bagan dari sudut kanan bawah",
+    "chartResizeS": "Ubah ukuran bagan dari tepi bawah",
+    "chartResizeSw": "Ubah ukuran bagan dari sudut kiri bawah",
+    "chartResizeW": "Ubah ukuran bagan dari tepi kiri",
+    "chartResizeHintBoth": "{label} (tombol panah; tahan Shift untuk 10 px)",
+    "chartResizeHintHorizontal": "{label} (panah kiri dan kanan; tahan Shift untuk 10 px)",
+    "chartResizeHintVertical": "{label} (panah atas dan bawah; tahan Shift untuk 10 px)"
   },
   "plugins": {
     "toolbarGroup": "Plugin",

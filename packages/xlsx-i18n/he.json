@@ -114,14 +114,6 @@
     "zoomPercent": "גודל תצוגה באחוזים",
     "apply": "החל",
     "cancel": "ביטול",
-    "freezeColumn": "הקפאת העמודה {column}",
-    "freezeColumns": "הקפאת העמודות {first}–{last}",
-    "freezeRow": "הקפאת השורה {row}",
-    "freezeRows": "הקפאת השורות {first}–{last}",
-    "unfreezePanes": "ביטול הקפאת החלונות",
-    "unhideColumns": "הצגת העמודות",
-    "unhideRows": "הצגת השורות",
-    "selectAll": "בחר הכל",
     "reasons": {
       "editorUnavailable": "העורך אינו מוכן.",
       "documentLoading": "חוברת העבודה עדיין נפתחת.",
@@ -147,6 +139,7 @@
       "editUnsupportedChart": "לא ניתן להחיל את העריכה הזו: תרשים משתמש בתאים שהיא הייתה מזיזה. חוברת העבודה לא השתנתה.",
       "editUnsupportedTable": "לא ניתן להחיל את העריכה הזו: טבלה משתמשת בתאים שהיא הייתה מזיזה. חוברת העבודה לא השתנתה.",
       "editUnsupportedPivot": "לא ניתן להחיל את העריכה הזו: טבלת ציר משתמשת בתאים שהיא הייתה מזיזה. חוברת העבודה לא השתנתה.",
+      "editUnsupportedFill": "לא ניתן להחיל את המילוי הזה: הוא היה משנה תאים עם קישורים, הערות או כללים. חוברת העבודה לא השתנתה.",
       "sheetProtected": "תא זה נמצא בגיליון מוגן.",
       "hostRefused": "עריכה זו אינה מותרת.",
       "tooManyToCheck": "יותר מדי תאים לבדיקה על ידי תוספים (מגבלה {limit}).",
@@ -166,9 +159,7 @@
       "lastSheet": "חוברת עבודה צריכה לפחות גיליון אחד.",
       "sheetAtEdge": "לא ניתן להזיז את הגיליון יותר.",
       "sheetNameInvalid": "שם גיליון צריך להכיל 1 עד 31 תווים, להיות ייחודי ולא להכיל : \\ / ? * [ ].",
-      "clipboardDenied": "הדפדפן לא התיר גישה ללוח.",
-      "clipboardInsecure": "הלוח דורש דף מאובטח (HTTPS).",
-      "clipboardWriteUnavailable": "הדפדפן הזה לא מתיר העתקה ללוח."
+      "clipboardDenied": "הדפדפן לא התיר גישה ללוח."
     },
     "cut": "גזור",
     "copy": "העתק",
@@ -204,8 +195,6 @@
     "sheetTabsLabel": "גיליונות",
     "clearExceedsLimit": "הניקוי חורג ממגבלת התאים",
     "cellMenuLabel": "תפריט תא",
-    "columnHeaderMenuLabel": "תפריט כותרת עמודה",
-    "rowHeaderMenuLabel": "תפריט כותרת שורה",
     "sheetTabMenuLabel": "תפריט לשונית הגיליון",
     "renameSheetLabel": "שנה את שם הגיליון",
     "sheetNamePrefix": "גיליון"
@@ -240,7 +229,18 @@
     "sheetActivated": "{name}, גיליון {index} מתוך {count}",
     "cellInputLabel": "עריכת התא {address}",
     "gridRoleDescription": "גיליון",
-    "fillHandleLabel": "ידית מילוי"
+    "fillHandleLabel": "ידית מילוי",
+    "chartResizeNw": "שינוי גודל התרשים מהפינה השמאלית העליונה",
+    "chartResizeN": "שינוי גודל התרשים מהקצה העליון",
+    "chartResizeNe": "שינוי גודל התרשים מהפינה הימנית העליונה",
+    "chartResizeE": "שינוי גודל התרשים מהקצה הימני",
+    "chartResizeSe": "שינוי גודל התרשים מהפינה הימנית התחתונה",
+    "chartResizeS": "שינוי גודל התרשים מהקצה התחתון",
+    "chartResizeSw": "שינוי גודל התרשים מהפינה השמאלית התחתונה",
+    "chartResizeW": "שינוי גודל התרשים מהקצה השמאלי",
+    "chartResizeHintBoth": "{label} (מקשי החצים; החזק את Shift לצעד של 10 פיקסלים)",
+    "chartResizeHintHorizontal": "{label} (חצים שמאלה וימינה; החזק את Shift לצעד של 10 פיקסלים)",
+    "chartResizeHintVertical": "{label} (חצים למעלה ולמטה; החזק את Shift לצעד של 10 פיקסלים)"
   },
   "plugins": {
     "toolbarGroup": "תוספים",

@@ -114,14 +114,6 @@
     "zoomPercent": "Zoom in percentuale",
     "apply": "Applica",
     "cancel": "Annulla",
-    "freezeColumn": "Blocca colonna {column}",
-    "freezeColumns": "Blocca colonne {first}–{last}",
-    "freezeRow": "Blocca riga {row}",
-    "freezeRows": "Blocca righe {first}–{last}",
-    "unfreezePanes": "Sblocca riquadri",
-    "unhideColumns": "Scopri colonne",
-    "unhideRows": "Scopri righe",
-    "selectAll": "Seleziona tutto",
     "reasons": {
       "editorUnavailable": "L'editor non è pronto.",
       "documentLoading": "Apertura della cartella di lavoro in corso.",
@@ -147,6 +139,7 @@
       "editUnsupportedChart": "Questa modifica non può essere applicata: un grafico usa celle che sposterebbe. La cartella di lavoro non è cambiata.",
       "editUnsupportedTable": "Questa modifica non può essere applicata: una tabella usa celle che sposterebbe. La cartella di lavoro non è cambiata.",
       "editUnsupportedPivot": "Questa modifica non può essere applicata: una tabella pivot usa celle che sposterebbe. La cartella di lavoro non è cambiata.",
+      "editUnsupportedFill": "Questo riempimento non può essere applicato: modificherebbe celle con collegamenti, note o regole. La cartella di lavoro non è cambiata.",
       "sheetProtected": "Questa cella si trova in un foglio protetto.",
       "hostRefused": "Questa modifica non è consentita.",
       "tooManyToCheck": "Troppe celle da controllare per i plugin (limite {limit}).",
@@ -166,9 +159,7 @@
       "lastSheet": "Una cartella di lavoro richiede almeno un foglio.",
       "sheetAtEdge": "Il foglio non può essere spostato oltre.",
       "sheetNameInvalid": "I nomi dei fogli richiedono da 1 a 31 caratteri, devono essere univoci e non possono contenere : \\ / ? * [ ].",
-      "clipboardDenied": "Il browser non ha consentito l’accesso agli appunti.",
-      "clipboardInsecure": "Gli appunti richiedono una pagina sicura (HTTPS).",
-      "clipboardWriteUnavailable": "Questo browser non consente di copiare negli appunti."
+      "clipboardDenied": "Il browser non ha consentito l’accesso agli appunti."
     },
     "cut": "Taglia",
     "copy": "Copia",
@@ -204,8 +195,6 @@
     "sheetTabsLabel": "Fogli",
     "clearExceedsLimit": "La cancellazione supera il limite di celle.",
     "cellMenuLabel": "Menu cella",
-    "columnHeaderMenuLabel": "Menu intestazione colonna",
-    "rowHeaderMenuLabel": "Menu intestazione riga",
     "sheetTabMenuLabel": "Menu della scheda del foglio",
     "renameSheetLabel": "Rinomina foglio",
     "sheetNamePrefix": "Foglio"
@@ -240,7 +229,18 @@
     "sheetActivated": "{name}, foglio {index} di {count}",
     "cellInputLabel": "Modifica cella {address}",
     "gridRoleDescription": "foglio di lavoro",
-    "fillHandleLabel": "Maniglia di riempimento"
+    "fillHandleLabel": "Maniglia di riempimento",
+    "chartResizeNw": "Ridimensiona il grafico dall'angolo superiore sinistro",
+    "chartResizeN": "Ridimensiona il grafico dal bordo superiore",
+    "chartResizeNe": "Ridimensiona il grafico dall'angolo superiore destro",
+    "chartResizeE": "Ridimensiona il grafico dal bordo destro",
+    "chartResizeSe": "Ridimensiona il grafico dall'angolo inferiore destro",
+    "chartResizeS": "Ridimensiona il grafico dal bordo inferiore",
+    "chartResizeSw": "Ridimensiona il grafico dall'angolo inferiore sinistro",
+    "chartResizeW": "Ridimensiona il grafico dal bordo sinistro",
+    "chartResizeHintBoth": "{label} (tasti freccia; tieni premuto Maiusc per 10 px)",
+    "chartResizeHintHorizontal": "{label} (frecce sinistra e destra; tieni premuto Maiusc per 10 px)",
+    "chartResizeHintVertical": "{label} (frecce su e giù; tieni premuto Maiusc per 10 px)"
   },
   "plugins": {
     "toolbarGroup": "Plugin",

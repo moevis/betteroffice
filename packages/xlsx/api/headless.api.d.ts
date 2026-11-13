@@ -278,6 +278,8 @@ export interface TextCmd {
     bold?: boolean;
     italic?: boolean;
     underline?: boolean;
+    /** The kind of `underline` when it is not single. */
+    underlineStyle?: 'double' | 'singleAccounting' | 'doubleAccounting';
     strike?: boolean;
     highlight?: string;
     dashedUnderline?: boolean;
@@ -380,6 +382,8 @@ export interface ChartRegion {
     clip: Rect;
     /** whether the anchor can be repinned; an absolute one cannot. */
     movable: boolean;
+    /** whether the anchor can be resized. A two-cell anchor writes both corners back, so it can. */
+    resizable: boolean;
 }
 /** Former name of {@link ChartRegion}, when it carried the label alone. */
 export type ChartA11yAttrs = ChartRegion;
