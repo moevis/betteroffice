@@ -68,7 +68,7 @@ async function workbook(protectedSheet: boolean, formatCells = false) {
   zip.file('xl/workbook.xml', '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Data" sheetId="1" r:id="rId1"/></sheets></workbook>');
   zip.file('xl/_rels/workbook.xml.rels', '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>');
   zip.file('xl/styles.xml', '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="1"><font/></fonts><fills count="1"><fill/></fills><borders count="1"><border/></borders><cellStyleXfs count="1"><xf/></cellStyleXfs><cellXfs count="2"><xf/><xf applyProtection="1"><protection locked="0"/></xf></cellXfs></styleSheet>');
-  zip.file('xl/worksheets/sheet1.xml', `<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="A1"><v>1</v></c><c r="B1" s="1"><v>2</v></c></row></sheetData>${protectedSheet ? `<sheetProtection sheet="1"${formatCells ? ' formatCells="0"' : ''}/>` : ''}</worksheet>`);
+  zip.file('xl/worksheets/sheet1.xml', `<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="A1"><v>1</v></c><c r="B1" s="1"><v>2</v></c><c r="C1" t="inlineStr"><is><t>one</t></is></c></row></sheetData>${protectedSheet ? `<sheetProtection sheet="1"${formatCells ? ' formatCells="0"' : ''}/>` : ''}</worksheet>`);
   return zip.generateAsync({ type: 'uint8array' });
 }
 
@@ -91,7 +91,7 @@ async function mount(protectedSheet: boolean, formatCells = false, i18n?: Transl
   return { view, session, api: ready.mock.calls[0][0] };
 }
 
-async function enter(view: { getByTestId(id: string): HTMLElement }, value: string) {
+async function enter(view: ReturnType<typeof render>, value: string) {
   fireEvent.keyDown(view.getByTestId('xlsx-scroll'), { key: 'F2' });
   const input = await waitFor(() => view.getByTestId('xlsx-cell-editor') as HTMLInputElement);
   await waitFor(() => expect(input.value).not.toBe(''));
@@ -145,59 +145,29 @@ describe('peerless protected cell input', () => {
   });
 });
 
-describe('peerless clipboard refusal', () => {
-  function replaceClipboard(value: unknown) {
-    const original = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
-    Object.defineProperty(navigator, 'clipboard', { configurable: true, value });
-    restorers.push(() => {
-      if (original) Object.defineProperty(navigator, 'clipboard', original);
-      else Reflect.deleteProperty(navigator, 'clipboard');
+describe('peerless replace dialog', () => {
+  it('opens from the keyboard and applies a replacement', async () => {
+    const { view, session } = await mount(false);
+    const name = view.getByTestId('xlsx-name-box');
+    fireEvent.change(name, { target: { value: 'C1' } });
+    fireEvent.keyDown(name, { key: 'Enter' });
+    await waitFor(() => expect(session.selection?.range).toMatchObject({ kind: 'rowCol', start: { row: 0, col: 2 } }));
+
+    const scroll = view.getByTestId('xlsx-scroll');
+    fireEvent.keyDown(scroll, { key: 'h', ...(navigator.platform.match(/Mac|iPod|iPhone|iPad/) ? { metaKey: true } : { ctrlKey: true }) });
+    const dialog = await waitFor(() => view.getByRole('dialog'));
+    expect(dialog.textContent).toContain('All sheets');
+    fireEvent.change(view.getByRole('textbox', { name: 'Find' }), { target: { value: 'one' } });
+    fireEvent.change(view.getByRole('textbox', { name: 'Replace with' }), { target: { value: 'two' } });
+    const apply = view.getByRole('button', { name: 'Replace all' }) as HTMLButtonElement;
+    fireEvent.click(apply);
+    await waitFor(async () => {
+      await act(async () => {
+        const callbacks = [...frames.values()];
+        frames.clear();
+        for (const callback of callbacks) callback(0);
+      });
+      expect((await session.call.cellInputs(0, 'C1')).cells[0][0].input).toBe('two');
     });
-  }
-
-  function replaceSecureContext(value: boolean) {
-    const original = Object.getOwnPropertyDescriptor(window, 'isSecureContext');
-    Object.defineProperty(window, 'isSecureContext', { configurable: true, value });
-    restorers.push(() => {
-      if (original) Object.defineProperty(window, 'isSecureContext', original);
-      else Reflect.deleteProperty(window, 'isSecureContext');
-    });
-  }
-
-  async function typedAndPaste(view: { getByTestId(id: string): HTMLElement }, session: xlsx.WorkbookSession) {
-    await enter(view, 'typed');
-    await waitFor(async () => expect((await session.call.cellInputs(0, 'A1')).cells[0][0].input).toBe('typed'));
-    fireEvent.keyDown(view.getByTestId('xlsx-scroll'), { key: 'v', ctrlKey: true });
-  }
-
-  it('commits the cell entry and refuses a paste when the page has no clipboard API', async () => {
-    const { view, session } = await mount(false);
-    replaceClipboard(undefined);
-    await typedAndPaste(view, session);
-    await waitFor(() => expect(view.getByTestId('xlsx-input-refusal').textContent)
-      .toBe('This browser does not allow pasting from a menu. Use the keyboard shortcut.'));
-    expect((await session.call.cellInputs(0, 'A1')).cells[0][0].input).toBe('typed');
-    expect(session.failure).toBeUndefined();
-    expect(view.queryByTestId('xlsx-error')).toBeNull();
-  });
-
-  it('names an insecure origin when the page is not a secure context', async () => {
-    const { view, session } = await mount(false);
-    replaceSecureContext(false);
-    await typedAndPaste(view, session);
-    await waitFor(() => expect(view.getByTestId('xlsx-input-refusal').textContent)
-      .toBe('The clipboard needs a secure (HTTPS) page.'));
-    expect((await session.call.cellInputs(0, 'A1')).cells[0][0].input).toBe('typed');
-    expect(session.failure).toBeUndefined();
-  });
-
-  it('reports a clipboard denial without dropping the cell entry', async () => {
-    const { view, session } = await mount(false);
-    replaceClipboard({ readText: async () => { throw new DOMException('Paste denied', 'NotAllowedError'); } });
-    await typedAndPaste(view, session);
-    await waitFor(() => expect(view.getByTestId('xlsx-input-refusal').textContent)
-      .toBe('The browser did not allow access to the clipboard.'));
-    expect((await session.call.cellInputs(0, 'A1')).cells[0][0].input).toBe('typed');
-    expect(session.failure).toBeUndefined();
   });
 });

@@ -15,7 +15,7 @@ import {
 } from '@betteroffice/xlsx/worker';
 import type {
   CapturedFormat, CellAddr, CellEdit, CellInputEdit, CellRange, ChartResizeEdges, Direction, DisplayList, EditResult,
-  Proposal, Rect, Selection, WorkbookFrame, WorkbookHandle, WorkbookSheetView, XlsxEditResult,
+  Proposal, Rect, Selection, WorkbookFrame, WorkbookHandle, WorkbookSheetView, XlsxCellAddress, XlsxEditResult,
 } from '@betteroffice/xlsx';
 import type { WorkbookReplayOp } from '@betteroffice/xlsx/worker';
 import { useDefaultFonts } from '../useDefaultFonts';
@@ -41,6 +41,9 @@ import { EditorToolbar } from '../components/EditorToolbar';
 import { FillHandle, fillHandleAnchor } from '../components/FillHandle';
 import { EditorChromeContext } from '../components/EditorToolbarContext';
 import type { BorderStyle } from '../components/Toolbar';
+import {
+  ReplaceDialog, type ReplaceDialogApi, type ReplaceDialogSheet, type ReplaceDialogTarget, withSheetCatalog,
+} from '../components/ReplaceDialog';
 import { FormulaBarContext, type FormulaBarBinding } from '../components/toolbar/FormulaBar';
 import { ToolbarCommandButton } from '../components/toolbar/ToolbarCommand';
 import { xlsxContextMenuSections, type XlsxContextFreezeTarget } from '../contextMenu/menus';
@@ -57,10 +60,6 @@ import { ProposalsPanel } from '../proposals/ProposalsPanel';
 import { cellInViewport, coversWholeTrack, deriveLimits, expandRangeToMergedCells, extendScrollExtent, laidOutCellRect, nearestCellScroll, positionAtPoint, scaledRect } from '../viewer/sessionGeometry';
 import { cellEditorColors } from '../viewer/cellEditorColors';
 import { ACTIVE_CELL_WIDTH, marqueeBox, marqueeFills, MARQUEE_COLOR, MARQUEE_WIDTH, SELECTION_FILL } from '../selectionOutline';
-import {
-  clipboardRefusalMessage, ClipboardRefusalError, clipboardUnavailable, readClipboardText, writeClipboard,
-  writeClipboardText,
-} from '../clipboard';
 import type { WorkerEditorApiBridge } from './createWorkerEditorApi';
 
 import { useLegacySessionWorkbook, EditableWorkbookSession, type EditableSessionWorkbookProps } from './useEditableSessionWorkbook';
@@ -177,6 +176,9 @@ export function LegacyXlsxWorkerEditor(props: EditableSessionWorkbookProps) {
   const [proposals, setProposals, proposalsRef] = useSyncedState<Proposal[]>([]);
   const [proposalsPanelOpen, setProposalsPanelOpen, panelRef] = useSyncedState(false);
   const [staleFor, setStaleFor] = useState<Record<string, string[]>>({});
+  const [replaceOpen, setReplaceOpen] = useState(false);
+  const [replaceTarget, setReplaceTarget] = useState<ReplaceDialogTarget | null>(null);
+  const replaceReveal = useRef<(cell: XlsxCellAddress) => void>(() => {});
   const mutationRef = useRef(0);
   const navigationRef = useRef(0);
   const [selectionNavigation] = useState(createSelectionDataNavigation);
@@ -195,11 +197,7 @@ export function LegacyXlsxWorkerEditor(props: EditableSessionWorkbookProps) {
   const draftRevision = useRef(0);
   const settledDraftRevision = useRef(0);
   const focus = useCallback(() => scrollRef.current?.focus({ preventScroll: true }), []);
-  const tRef = useRef(t);
-  tRef.current = t;
   const reportInputError = useCallback((error: unknown) => {
-    const clipboard = clipboardRefusalMessage(error, tRef.current);
-    if (clipboard) { setRefusal(clipboard); return; }
     const local = inputRefusal(error);
     if (local || error instanceof XlsxCommandAdmissionError) {
       setRefusal((local ?? error as Error).message);
@@ -243,7 +241,7 @@ export function LegacyXlsxWorkerEditor(props: EditableSessionWorkbookProps) {
     canvas.height = Math.round(request.height * request.dpr);
     canvas.style.width = `${request.width}px`;
     canvas.style.height = `${request.height}px`;
-    const settled = paintWithDefaultFonts(displayList, () => paintDisplayList(context, displayList, request.dpr * request.zoom, { x: 0, y: 0 }, request.zoom));
+    const settled = paintWithDefaultFonts(displayList, () => paintDisplayList(context, displayList, request.dpr * request.zoom));
     heldPreview.current = settled ? null : { canvas, displayList, request };
     canvas.dataset.previewReady = settled ? 'true' : 'pending';
   };
@@ -782,7 +780,7 @@ export function LegacyXlsxWorkerEditor(props: EditableSessionWorkbookProps) {
         canvas.style.width = `${request.width}px`;
         canvas.style.height = `${request.height}px`;
         canvas.dataset.defaultFonts = paintWithDefaultFonts(painted.displayList,
-          () => paintDisplayList(context, painted.displayList, request.dpr * request.zoom, { x: 0, y: 0 }, request.zoom)) ? 'settled' : 'pending';
+          () => paintDisplayList(context, painted.displayList, request.dpr * request.zoom)) ? 'settled' : 'pending';
         canvas.dataset.workerSequence = String(painted.sequence);
         canvas.dataset.paintSource = painted.source;
         canvas.dataset.workerZoom = String(request.zoom);
@@ -1107,29 +1105,23 @@ export function LegacyXlsxWorkerEditor(props: EditableSessionWorkbookProps) {
     const usedRange = () => run!.peer?.selectionData(sheet, 0, 0, 'usedRange').usedRange;
     let clipboardWrite: { resolve(payload: Blob): void; reject(error: unknown): void; done: Promise<boolean> } | undefined;
     if (kind !== 'paste') {
-      const writeRefusal = typeof ClipboardItem === 'function' ? clipboardUnavailable('write') : 'unsupported';
-      if (writeRefusal) {
-        if (kind === 'cut') { reportInputError(new ClipboardRefusalError(writeRefusal, 'write')); return; }
+      if (typeof ClipboardItem !== 'function' || typeof navigator.clipboard.write !== 'function') {
+        if (kind === 'cut') { reportInputError(new WorkerInputRefusal('Cut requires clipboard write access')); return; }
       } else {
         let resolve!: (payload: Blob) => void;
         let reject!: (error: unknown) => void;
         const payload = new Promise<Blob>((done, failed) => { resolve = done; reject = failed; });
         void payload.catch(() => {});
         try {
-          const done = writeClipboard(() => new ClipboardItem({ 'text/plain': payload })).then(
-            () => true, (error) => {
-              const refusal = error instanceof ClipboardRefusalError
-                ? new ClipboardRefusalError(error.unavailable, error.method, kind === 'cut') : error;
-              reject(refusal);
-              throw refusal;
-            }
+          const done = navigator.clipboard.write([new ClipboardItem({ 'text/plain': payload })]).then(
+            () => true, (error) => { reject(error); throw new WorkerInputRefusal(error instanceof Error ? error.message : 'Clipboard write failed', kind === 'cut'); }
           );
           void done.catch(() => {});
           clipboardWrite = { resolve, reject, done };
-        } catch (error) { reject(error); reportInputError(error); return; }
+        } catch (error) { reject(error); reportInputError(new WorkerInputRefusal(error instanceof Error ? error.message : 'Clipboard write failed')); return; }
       }
     }
-    const captureClipboard = () => kind === 'paste' ? readClipboardText() : '';
+    const captureClipboard = () => kind === 'paste' ? navigator.clipboard.readText() : '';
     let mutation: Extract<WorkbookReplayOp, { method: 'editCells' }> | undefined;
     let discardPreview: (() => Promise<void>) | undefined;
     let clipboardRefusal: unknown;
@@ -1164,7 +1156,8 @@ export function LegacyXlsxWorkerEditor(props: EditableSessionWorkbookProps) {
           clipboardWrite.resolve(new Blob([copied], { type: 'text/plain' }));
           written = await clipboardWrite.done;
         } else {
-          await writeClipboardText(copied); written = true;
+          try { await navigator.clipboard.writeText(copied); written = true; }
+          catch (error) { throw new WorkerInputRefusal(error instanceof Error ? error.message : 'Clipboard write failed'); }
         }
         if (!owner.current) throw new XlsxCommandAdmissionError('document-replaced');
         markApplied.check();
@@ -1367,6 +1360,69 @@ export function LegacyXlsxWorkerEditor(props: EditableSessionWorkbookProps) {
       }
     }, { kind: 'input', target: { sheet, target: destinationA1 } }).catch(reportInputError);
   }, [acceptInput, apply, coordinator, operationPeer, reportInputError]);
+  replaceReveal.current = (cell) => {
+    const sheet = runRef.current?.peer?.sheetInfo().sheetIds.indexOf(cell.sheetId) ?? -1;
+    if (sheet >= 0) navigate(sheet, selectionAt({ row: cell.row, col: cell.col }));
+  };
+  const openReplaceDialog = () => {
+    const peer = runRef.current?.peer;
+    const selected = selectionRef.current;
+    const info = peer?.sheetInfo();
+    const sheetId = info?.sheetIds[activeRef.current];
+    if (!peer || !info || !sheetId || !selected) {
+      setReplaceTarget(null);
+      setReplaceOpen(true);
+      return;
+    }
+    const range = normalizeRange(selected);
+    const from = address({ row: range.top, col: range.left });
+    const to = address({ row: range.bottom, col: range.right });
+    const sheets = info.sheetIds.map((id, index) => ({ sheetId: id, name: info.sheetNames[index] ?? id }));
+    let catalog: ReplaceDialogSheet[] = sheets;
+    try { catalog = withSheetCatalog(sheets, peer.readCells({ ranges: [] })); } catch {}
+    setReplaceTarget({
+      sheetId,
+      range: { kind: 'rowCol', start: { row: range.top, col: range.left }, end: { row: range.bottom, col: range.right } },
+      label: from === to ? from : `${from}:${to}`,
+      activeCell: { row: selected.anchor.row, col: selected.anchor.col },
+      sheets: catalog,
+    });
+    setReplaceOpen(true);
+  };
+  const replaceApi = useMemo<ReplaceDialogApi>(() => {
+    const peer = () => {
+      const current = runRef.current;
+      if (!current?.ready || !current.peer) throw new Error('The editor is not ready.');
+      return current.peer;
+    };
+    return {
+      version: () => peer().version(),
+      find: (request) => peer().findText(request),
+      validate: (request) => peer().validateEdits(request),
+      reveal: (cell) => replaceReveal.current(cell),
+      apply: (request) => {
+        const op: WorkbookReplayOp = { method: 'applyEdits', args: [structuredClone(request)] };
+        return coordinator.runAfterPendingInput(async (_, markApplied) => {
+          await boundary();
+          const current = runRef.current;
+          const editor = current?.recovering ? operationPeer.current : current?.editPeer;
+          if (!current?.current || current.retiring || current.failure || !editor || !acceptInput()) {
+            throw new Error('The editor is not ready.');
+          }
+          markApplied.check();
+          const operations = workbookEditPeerOperations(editor);
+          const result = (current.recovering ? operations.applyRecoveryOp(op) : operations.applyQueuedOp(op)) as XlsxEditResult;
+          if (!result.ok) {
+            markApplied.refuse(new WorkerInputRefusal(result.failure.message), true);
+            return result;
+          }
+          markApplied();
+          apply(result);
+          return result;
+        }, { kind: 'command', input: op });
+      },
+    };
+  }, [acceptInput, apply, boundary, coordinator, operationPeer]);
   const onMouseDown = (event: MouseEvent) => {
     if (fromPlugin(event) || runRef.current?.failure || editorInputRef.current?.contains(event.target as Node)) return;
     const { cell, chart } = point(event);
@@ -1693,7 +1749,8 @@ export function LegacyXlsxWorkerEditor(props: EditableSessionWorkbookProps) {
     coordinator, preview: () => preview(), recovering: () => runRef.current?.recovering ?? false,
     i18n: () => propsRef.current.i18n, translate: t, apply, fail: (error) => run?.fail(error),
     setZoom: (scale) => { setZoom(scale); sourceRef.current?.schedule(); },
-    setProposalsPanelOpen, setCapturedFormat: (format, source) => {
+    setProposalsPanelOpen, setReplaceOpen: (open) => { if (open) openReplaceDialog(); else setReplaceOpen(false); },
+    setCapturedFormat: (format, source) => {
       setCapturedFormat(format); paintFormatSource.current = source;
     },
     setBorderStyle: (style) => { borderStyleRef.current = style; },
@@ -1838,7 +1895,7 @@ export function LegacyXlsxWorkerEditor(props: EditableSessionWorkbookProps) {
   const visibleSelection = painted?.request.sheet === active ? selection : null;
   const merged = painted?.mergedRanges ?? [];
   const grid = frame?.grid;
-  const selected = visibleSelection ? expandRangeToMergedCells(normalizeRange(visibleSelection), merged) : null;
+  const selected = visibleSelection ? expandRangeToMergedCells(normalizeRange(visibleSelection), merged, Boolean(props.showSheetHeaders)) : null;
   const focused = visibleSelection ? expandRangeToMergedCells({ top: visibleSelection.focus.row,
     left: visibleSelection.focus.col, bottom: visibleSelection.focus.row, right: visibleSelection.focus.col }, merged) : null;
   const selectionRect = grid && selected ? rangeRect(grid, selected) : null;
@@ -1947,13 +2004,14 @@ export function LegacyXlsxWorkerEditor(props: EditableSessionWorkbookProps) {
     const focus = axis === 'col' ? { row: 0, col: index } : { row: index, col: 0 };
     setRawSelection({ anchor, focus, range: track });
   };
+  const endChartGesture = () => { chartDrag.current = null; cancelChartResize(); setChartPreview(null); };
+  const dropChart = () => { endChartGesture(); setSelectedChart(null); };
   const onHeaderMouseDown = (axis: 'col' | 'row', index: number, event: MouseEvent) => {
     if (event.button !== 0 || fromPlugin(event) || runRef.current?.failure) return;
     if (editingRef.current !== null) commitDraft('cell');
     else if (coordinator.draft?.source === 'formula') commitDraft('formula');
     flushNudgeRef.current();
-    chartDrag.current = null;
-    setSelectedChart(null);
+    dropChart();
     selectHeader(axis, index, event.shiftKey);
     clickStart.current = null;
     focus();
@@ -1968,8 +2026,7 @@ export function LegacyXlsxWorkerEditor(props: EditableSessionWorkbookProps) {
     if (editingRef.current !== null) commitDraft('cell');
     else if (coordinator.draft?.source === 'formula') commitDraft('formula');
     flushNudgeRef.current();
-    chartDrag.current = null;
-    setSelectedChart(null);
+    dropChart();
     setRawSelection({
       anchor: { row: 0, col: 0 },
       focus: { row: 0, col: 0 },
@@ -1980,6 +2037,7 @@ export function LegacyXlsxWorkerEditor(props: EditableSessionWorkbookProps) {
   };
   const onHeaderResize = (axis: 'col' | 'row', index: number, size: number,
     run?: { at: number; count: number }) => {
+    if (run && ((axis === 'row' && run.count >= XLSX_MAX_ROWS) || (axis === 'col' && run.count >= XLSX_MAX_COLUMNS))) return;
     if (!acceptInput()) return;
     const sheet = activeRef.current;
     // the band reports pixels; the engine stores characters and points.
@@ -1994,32 +2052,10 @@ export function LegacyXlsxWorkerEditor(props: EditableSessionWorkbookProps) {
       ? { type: 'setColWidth', sheet, col: index, width: columnWidthFromPx(size) }
       : { type: 'setRowHeight', sheet, row: index, height: rowHeightFromPx(size) });
   };
-  const onHeaderReorder = (axis: 'col' | 'row', at: number, before: number, count: number) => {
-    if (!acceptInput()) return;
-    const painted = sourceRef.current?.painted;
-    if (!painted || painted.request.sheet !== activeRef.current) return;
-    // the band reports sheet indices in pre-move coordinates, so the op takes
-    // them as-is; `count` is the selection's span, hidden tracks included.
-    const sheet = activeRef.current;
-    // one op keeps the move a single undo step.
-    applyStructuralOp(axis === 'col'
-      ? { type: 'moveCols', sheet, col: at, count, before }
-      : { type: 'moveRows', sheet, row: at, count, before });
-  };
-  const onHeaderUnhide = (axis: 'col' | 'row', spans: [number, number][]) => {
-    const painted = sourceRef.current?.painted;
-    if (!painted || painted.request.sheet !== activeRef.current) return;
-    const sheet = activeRef.current;
-    const ops = spans.map(([start, end]) => axis === 'col'
-      ? { type: 'setColsVisibility', sheet, col: start, count: end - start + 1, hidden: false }
-      : { type: 'setRowsVisibility', sheet, row: start, count: end - start + 1, hidden: false });
-    // one batch keeps a whole handle press a single undo step.
-    if (ops.length > 0) applyStructuralOps(ops);
-  };
   // keyed on the session for the same reason the peerless editor is: the first
   // render has no session, and a `[]` memo would pin handlers bound to it.
   const headerHandlers = useMemo<SheetGridHeaderHandlers>(() => ({
-    onHeaderMouseDown, onHeaderResize, onHeaderReorder, onHeaderUnhide, onSelectAll,
+    onHeaderMouseDown, onHeaderResize, onSelectAll, onHeaderPress: dropChart,
     // a drag from an unselected header extends from the anchor the press set;
     // the press already committed the draft and took focus.
     onHeaderDragSelect: (axis, index) => {
@@ -2043,6 +2079,7 @@ export function LegacyXlsxWorkerEditor(props: EditableSessionWorkbookProps) {
         ? request.target.closest<HTMLElement>('[data-col], [data-row]') : null;
       const index = Number(axis === 'col' ? track?.dataset.col : track?.dataset.row);
       if (!track || !Number.isInteger(index)) return null;
+      dropChart();
       // select the pressed track so the visible selection matches the menu's target.
       selectHeader(axis, index, false);
       const sheet = activeRef.current;
@@ -2098,9 +2135,15 @@ export function LegacyXlsxWorkerEditor(props: EditableSessionWorkbookProps) {
     },
   });
 
-  // The chart box keeps the outline: it is a movable frame rather than a cell
-  // edge and has no snapped interior to straddle.
-  const outline = (rect: NonNullable<typeof selectionRect>, color: string, width: 1 | 2 = 2): CSSProperties => {
+  const headers = Boolean(props.showSheetHeaders);
+  const outline = (rect: NonNullable<typeof selectionRect>, border: string, background?: string): CSSProperties => {
+    const scaled = scaledRect(rect, paintedZoom);
+    return { position: 'absolute', left: scaled.x, top: scaled.y, width: scaled.w, height: scaled.h,
+      boxSizing: 'border-box', border, background };
+  };
+  // With headers the chart box keeps an outline: it is a movable frame rather
+  // than a cell edge and has no snapped interior to straddle.
+  const edgeOutline = (rect: NonNullable<typeof selectionRect>, color: string, width: 1 | 2 = 2): CSSProperties => {
     const scaled = scaledRect(rect, paintedZoom);
     return { position: 'absolute', left: scaled.x, top: scaled.y, width: scaled.w, height: scaled.h,
       outline: `${width}px solid ${color}`, outlineOffset: -width / 2 };
@@ -2114,7 +2157,7 @@ export function LegacyXlsxWorkerEditor(props: EditableSessionWorkbookProps) {
     return { position: 'absolute', left: box.left, top: box.top, width: box.width, height: box.height,
       boxShadow: `inset 0 0 0 ${width}px ${MARQUEE_COLOR}` };
   };
-  const fills = selectionRect && !selectedChart
+  const fills = headers && selectionRect && !selectedChart
     ? marqueeFills(scaledRect(selectionRect, paintedZoom), focusRect ? scaledRect(focusRect, paintedZoom) : null) : [];
   const defaultToolbar = <EditorToolbar mode="commands">
     <EditorToolbar.Toolbar />
@@ -2139,14 +2182,15 @@ export function LegacyXlsxWorkerEditor(props: EditableSessionWorkbookProps) {
           <div ref={dockAreaRef} data-testid="xlsx-workspace" style={{ position: 'relative', display: 'flex', flex: 1, minWidth: 0, minHeight: 0 }}>
             {renderDock('left')}
             <div style={{ position: 'relative', display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0, minHeight: 0 }}>
+              <ReplaceDialog open={replaceOpen} target={replaceTarget} api={replaceApi} readOnly={props.readOnly}
+                onClose={() => setReplaceOpen(false)} />
               {isProposalsAvailable() && proposalsPanelOpen && <ProposalsPanel proposals={proposals} staleFor={staleFor}
                 style={{ top: 4, right: 8, width: 'min(320px, calc(100% - 16px))', maxHeight: 'min(420px, calc(100% - 12px))' }} />}
               {pluginHost.rowGutter && <PluginRowGutter host={pluginHost.host} index={pluginHost.rowGutter}
-                painted={pluginHost.painted} zoom={zoom} top={COLUMN_HEADER_HEIGHT} />}
-              <SheetGrid frame={frame} zoom={paintedZoom} leadingInset={pluginHost.rowGutter ? ROW_GUTTER_WIDTH * zoom : 0} headerHandlers={headerHandlers} selection={selection}
+                painted={pluginHost.painted} zoom={zoom} top={props.showSheetHeaders ? COLUMN_HEADER_HEIGHT : 0} />}
+              <SheetGrid frame={frame} zoom={paintedZoom} leadingInset={pluginHost.rowGutter ? ROW_GUTTER_WIDTH * zoom : 0} showSheetHeaders={headers} headerHandlers={headerHandlers} selection={selection}
                 sheet={painted?.request.sheet}
-                selectAllLabel={t('commands.selectAll')}
-                unhideLabels={{ col: t('commands.unhideColumns'), row: t('commands.unhideRows') }}>
+                selectAllLabel={t('commands.selectAll')}>
               <div ref={scrollRef} data-testid="xlsx-scroll" tabIndex={0} onKeyDown={onKeyDown}
                 onMouseDown={onMouseDown} onMouseMove={onMouseMove} onClick={onClick}
                 onDoubleClick={(event) => {
@@ -2156,15 +2200,14 @@ export function LegacyXlsxWorkerEditor(props: EditableSessionWorkbookProps) {
                   openEditor();
                 }}
                 onMouseLeave={(event) => { event.currentTarget.style.cursor = 'default'; event.currentTarget.title = ''; }}
-                style={{ position: 'relative', flex: 1, overflow: 'auto', minHeight: 0, outline: 'none' }}>
+                style={{ position: 'relative', flex: 1, overflow: 'auto', minHeight: 0, outline: 'none',
+                  ...(pluginHost.rowGutter && !props.showSheetHeaders ? { marginLeft: ROW_GUTTER_WIDTH * zoom } : {}) }}>
                 <div style={{ position: 'absolute', top: 0, left: 0, width: view ? view.contentWidth * zoom : '100%',
                   height: view ? view.contentHeight * zoom : '100%' }} />
                 <div style={{ position: 'sticky', top: 0, left: 0, width: 0, height: 0 }}>
                   <canvas ref={canvasRef} style={{ display: 'block', position: 'absolute', top: 0, left: 0 }} />
                   {previewDraft && (run?.ready ? <div data-testid="xlsx-commit-preview" aria-hidden
-                    style={{ position: 'absolute', left: (previewRect?.x ?? 0) * paintedZoom,
-                      top: (previewRect?.y ?? 0) * paintedZoom, width: (previewRect?.w ?? 96) * paintedZoom,
-                      height: (previewRect?.h ?? 24) * paintedZoom, background: '#fff',
+                    style={{ ...outline(previewRect ?? { x: 0, y: 0, w: 96, h: 24 }, 'none', '#fff'),
                       color: '#000', padding: `0 ${8 * paintedZoom}px`, overflow: 'hidden', whiteSpace: 'pre',
                       display: previewDraft.sheet === active && (!grid || previewRect) ? 'block' : 'none',
                       font: `${13 * paintedZoom}px system-ui, sans-serif`,
@@ -2178,17 +2221,17 @@ export function LegacyXlsxWorkerEditor(props: EditableSessionWorkbookProps) {
                       style={{ position: 'absolute', left: fill.x, top: fill.y, width: fill.w, height: fill.h,
                         background: SELECTION_FILL }} />)}
                     {selectionRect && !selectedChart && <div data-testid="xlsx-selection"
-                      style={marquee(selectionRect)} />}
+                      style={headers ? marquee(selectionRect) : outline(selectionRect, `1px solid ${BRAND}`, 'rgba(33, 115, 70, 0.12)')} />}
                     {props.fillHandle && !props.readOnly && !editing && !coordinator.draft && !selectedChart && acceptInput() &&
                       fillHandleRect && selected && !coversWholeTrack(selected, limits()) && (
                       <FillHandle rect={fillHandleRect} source={selected}
                         rectForRange={fillPreviewRect} cellAt={cellAtPointForFill} onFill={fillSelection}
                         ariaLabel={t('a11y.fillHandleLabel')} />
                     )}
-                    {focusRect && !selectedChart && !editing && <div data-testid="xlsx-active-cell"
-                      style={marquee(focusRect, ACTIVE_CELL_WIDTH)} />}
+                    {focusRect && !selectedChart && !editing && <div data-testid={headers ? 'xlsx-active-cell' : undefined}
+                      style={headers ? marquee(focusRect, ACTIVE_CELL_WIDTH) : outline(focusRect, `2px solid ${BRAND}`)} />}
                     {shownChart && <div data-testid="xlsx-chart-selection" data-chart-id={selectedChart?.id} aria-hidden
-                      style={{ ...outline(shownChart, BRAND),
+                      style={{ ...(headers ? edgeOutline(shownChart, BRAND) : outline(shownChart, `2px solid ${BRAND}`)),
                         transform: `translate(${chartPreview?.kind === 'move' ? chartPreview.x : 0}px, ${chartPreview?.kind === 'move' ? chartPreview.y : 0}px)`,
                         boxShadow: '0 1px 6px rgba(0, 0, 0, 0.25)' }} />}
                     {showChartHandles && scaledChart && <ChartResizeHandles rect={scaledChart}
@@ -2215,11 +2258,8 @@ export function LegacyXlsxWorkerEditor(props: EditableSessionWorkbookProps) {
                         if (suppressBlur.current) { suppressBlur.current = false; return; }
                         commitDraft('cell');
                       }}
-                      style={{ position: 'absolute', left: editRect.x * paintedZoom, top: editRect.y * paintedZoom,
-                        width: editRect.w * paintedZoom, height: editRect.h * paintedZoom, boxSizing: 'border-box',
-                        border: `2px solid ${BRAND}`, background: editColors?.background, color: editColors?.color,
-                        padding: '0 3px', font: `${13 * paintedZoom}px system-ui, sans-serif`, pointerEvents: 'auto',
-                        outline: 'none' }} />}
+                      style={{ ...outline(editRect, `2px solid ${BRAND}`, editColors?.background), color: editColors?.color, padding: '0 3px',
+                        font: `${13 * paintedZoom}px system-ui, sans-serif`, pointerEvents: 'auto', outline: 'none' }} />}
                   </div>
                 </div>
               </div>

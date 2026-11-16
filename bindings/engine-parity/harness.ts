@@ -18,8 +18,18 @@ export interface RowExpectation {
   /** Distinguishes a second row of the same method in test names. */
   name?: string;
   mutates?: boolean;
-  throws?: { name: string; reason: string };
+  /** `message`, when set, must be contained in (string) or match (RegExp) the error message. */
+  throws?: { name: string; reason: string; message?: string | RegExp };
   voidReason?: string;
+  /** Values each engine generates itself, compared by shape instead of by value. */
+  masked?: readonly MaskedPath[];
+}
+
+export interface MaskedPath {
+  /** Dotted keys into the returned value. */
+  path: string;
+  /** Throws when the value has the wrong shape; returns the part both engines must still agree on. */
+  shape: (value: unknown) => unknown;
 }
 
 export interface Row<T> extends RowExpectation {
@@ -122,6 +132,31 @@ interface Observation {
   saved?: Outcome;
 }
 
+function replaceAt(value: unknown, keys: readonly string[], replace: (leaf: unknown) => unknown, where: string): unknown {
+  if (keys.length === 0) return replace(value);
+  const [key, ...rest] = keys as [string, ...string[]];
+  if (value === null || typeof value !== 'object' || !Object.hasOwn(value, key)) throw new Error(`${where}: no value at the masked path`);
+  const copy: Record<string, unknown> = Array.isArray(value) ? [...value] as unknown as Record<string, unknown> : { ...value };
+  copy[key] = replaceAt((value as Record<string, unknown>)[key], rest, replace, where);
+  return copy;
+}
+
+function maskedOutcome(row: RowExpectation, side: string, outcome: unknown): unknown {
+  if (!row.masked || outcome === null || typeof outcome !== 'object' || !('value' in outcome)) return outcome;
+  let { value } = outcome;
+  for (const { path, shape } of row.masked) {
+    const where = `${rowName(row)}: ${side} ${path}`;
+    value = replaceAt(value, path.split('.'), (leaf) => {
+      try {
+        return { masked: path, kept: shape(leaf) };
+      } catch (error) {
+        throw new Error(`${where}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }, where);
+  }
+  return { value };
+}
+
 async function observe<T>(row: Row<T>, engine: EngineHandle<T>, side: string): Promise<Observation> {
   try {
     const setup = await capture(() => row.setup?.(engine.target));
@@ -129,9 +164,10 @@ async function observe<T>(row: Row<T>, engine: EngineHandle<T>, side: string): P
     const before = engine.generated();
     const outcome = await capture(() => row.call(engine.target, setup.value as never));
     const generated = [...before, ...engine.generated()];
-    if (!row.mutates) return { outcome: await normalized(outcome, generated) };
+    const observed = maskedOutcome(row, side, await normalized(outcome, generated));
+    if (!row.mutates) return { outcome: observed };
     const saved = await capture(() => engine.save());
-    return { outcome: await normalized(outcome, generated), saved: await normalized(saved, generated) as Outcome };
+    return { outcome: observed, saved: await normalized(saved, generated) as Outcome };
   } finally {
     engine.free();
   }
@@ -143,26 +179,31 @@ async function observeBoth<T>(row: Row<T>, makeWasm: MakeEngine<T>, makeNative: 
   return { wasm, native };
 }
 
-async function expectDocxPackage(name: string, side: string, saved: Outcome): Promise<Uint8Array> {
+async function expectPackage(name: string, side: string, saved: Outcome, mainPart: string): Promise<Uint8Array> {
   if ('error' in saved) throw new Error(`${name}: ${side} save threw ${saved.error.name}: ${saved.error.message}`);
   const bytes = saved.value;
   if (!(bytes instanceof Uint8Array) || bytes.byteLength === 0) throw new Error(`${name}: ${side} save returned no bytes`);
   const zip = await JSZip.loadAsync(bytes, { checkCRC32: true }).catch((error: unknown) => {
     throw new Error(`${name}: ${side} save is not a valid zip: ${String(error)}`);
   });
-  if (!zip.file('word/document.xml')) throw new Error(`${name}: ${side} save has no word/document.xml`);
+  if (!zip.file(mainPart)) throw new Error(`${name}: ${side} save has no ${mainPart}`);
   return bytes;
 }
 
 /** Runs one row on a fresh wasm and a fresh native session and requires equal outcomes and saves. */
-export async function runRow<T>(row: Row<T>, makeWasm: MakeEngine<T>, makeNative: MakeEngine<T>): Promise<void> {
+export async function runRow<T>(
+  row: Row<T>,
+  makeWasm: MakeEngine<T>,
+  makeNative: MakeEngine<T>,
+  mainPart = 'word/document.xml',
+): Promise<void> {
   const { wasm, native } = await observeBoth(row, makeWasm, makeNative);
   const name = rowName(row);
   expect(native.outcome, name).toStrictEqual(wasm.outcome);
   expectDeclaredOutcome(row, wasm.outcome as Outcome);
   if (!row.mutates) return;
-  const nativeBytes = await expectDocxPackage(name, 'native', native.saved!);
-  const wasmBytes = await expectDocxPackage(name, 'wasm', wasm.saved!);
+  const nativeBytes = await expectPackage(name, 'native', native.saved!, mainPart);
+  const wasmBytes = await expectPackage(name, 'wasm', wasm.saved!, mainPart);
   await expectSavedPartsEqual(nativeBytes, wasmBytes);
 }
 
@@ -176,7 +217,12 @@ async function differs(check: () => unknown): Promise<boolean> {
 }
 
 /** A known difference holds only while both engines run the row and their outcomes or saves still differ. */
-export async function runKnownDifference<T>(row: Row<T>, makeWasm: MakeEngine<T>, makeNative: MakeEngine<T>): Promise<void> {
+export async function runKnownDifference<T>(
+  row: Row<T>,
+  makeWasm: MakeEngine<T>,
+  makeNative: MakeEngine<T>,
+  mainPart = 'word/document.xml',
+): Promise<void> {
   const name = rowName(row);
   const observed = await observeBoth(row, makeWasm, makeNative).catch((error: unknown) => {
     throw new Error(`${error instanceof Error ? error.message : String(error)}; a known difference needs both engines to run the row, so fix the setup or remove the knownDifferences entry`);
@@ -186,11 +232,24 @@ export async function runKnownDifference<T>(row: Row<T>, makeWasm: MakeEngine<T>
   if (row.mutates) {
     const [left, right] = [native.saved!, wasm.saved!];
     const savedDiffer = 'value' in left && 'value' in right
-      ? await differs(() => expectSavedPartsEqual(left.value as Uint8Array, right.value as Uint8Array))
+      ? await (async () => {
+        const nativeBytes = await expectPackage(name, 'native', left, mainPart);
+        const wasmBytes = await expectPackage(name, 'wasm', right, mainPart);
+        return differs(() => expectSavedPartsEqual(nativeBytes, wasmBytes));
+      })()
       : await differs(() => expect(left).toStrictEqual(right));
     if (savedDiffer) return;
   }
   throw new Error(`${name}: both engines now agree; remove the knownDifferences entry`);
+}
+
+function freshPattern(pattern: RegExp): RegExp {
+  return new RegExp(pattern.source, pattern.flags);
+}
+
+function matchesAnyMessage(message: string | RegExp | undefined): boolean {
+  if (message === undefined) return false;
+  return typeof message === 'string' ? message === '' : freshPattern(message).test('');
 }
 
 /** An agreed outcome still has to be the declared one: an error needs `throws`, `undefined` needs `mutates` or `voidReason`. */
@@ -199,7 +258,11 @@ export function expectDeclaredOutcome(row: RowExpectation, outcome: Outcome): vo
   if ('error' in outcome) {
     const { error } = outcome;
     if (!row.throws) throw new Error(`${name}: both engines threw ${error.name}: ${error.message}`);
+    const { message } = row.throws;
+    if (matchesAnyMessage(message)) throw new Error(`${name}: throws message matches any error message`);
     expect(error.name, `${name} error`).toBe(row.throws.name);
+    if (typeof message === 'string') expect(error.message, `${name} error message`).toContain(message);
+    else if (message) expect(error.message, `${name} error message`).toMatch(freshPattern(message));
     return;
   }
   if (row.throws) throw new Error(`${name}: declares throws ${row.throws.name} but both engines returned a value`);
@@ -219,15 +282,83 @@ export function surfaceMethods(wasm: readonly Surface[], native: Surface): strin
   return [...new Set(wasm.flatMap(names))].filter((name) => nativeNames.has(name)).sort();
 }
 
-export function coverageProblems(
-  surface: readonly string[],
-  plan: {
-    rows: readonly RowExpectation[];
-    exclusions: readonly Exclusion[];
-    notYetCovered: readonly string[];
-    knownDifferences: readonly KnownDifference[];
-  },
-): string[] {
+export type EngineSide = 'native' | 'wasm';
+
+export interface OneEngineExport {
+  name: string;
+  side: EngineSide;
+}
+
+export interface OneEngineOnly extends OneEngineExport {
+  reason: 'BY_DESIGN' | 'PARKED' | 'GAP' | 'BUILD_METADATA' | 'PACKAGING';
+  note: string;
+}
+
+function exportNames(surfaces: readonly Surface[]) {
+  const classes = new Map<string, Set<string>>();
+  for (const surface of surfaces) {
+    for (const [owner, members] of surface.classes) {
+      const names = classes.get(owner) ?? new Set<string>();
+      for (const member of members.keys()) names.add(member);
+      classes.set(owner, names);
+    }
+  }
+  return { classes, bare: new Set(surfaces.flatMap((surface) => [...surface.functions.keys(), ...surface.consts])) };
+}
+
+/** Exports declared on one engine only: a whole class by its name, otherwise `Class.member`, functions and consts. */
+export function oneEngineExports(wasm: readonly Surface[], native: Surface): OneEngineExport[] {
+  const sides = { wasm: exportNames(wasm), native: exportNames([native]) };
+  const only = (side: EngineSide, other: EngineSide): OneEngineExport[] => [
+    ...[...sides[side].classes].flatMap(([owner, members]) => {
+      const shared = sides[other].classes.get(owner);
+      return shared ? [...members].filter((member) => !shared.has(member)).map((member) => `${owner}.${member}`) : [owner];
+    }),
+    ...[...sides[side].bare].filter((name) => !sides[other].bare.has(name)),
+  ].map((name) => ({ name, side }));
+  return [...only('wasm', 'native'), ...only('native', 'wasm')].sort((a, b) => a.name.localeCompare(b.name));
+}
+
+export function oneEngineProblems(actual: readonly OneEngineExport[], listed: readonly OneEngineOnly[]): string[] {
+  const problems: string[] = [];
+  const key = (entry: OneEngineExport) => `${entry.side}:${entry.name}`;
+  const actualKeys = new Set(actual.map(key));
+  const listedKeys = new Set<string>();
+  for (const entry of listed) {
+    if (listedKeys.has(key(entry))) problems.push(`${entry.name}: listed twice in oneEngineOnly`);
+    listedKeys.add(key(entry));
+    if (!actualKeys.has(key(entry))) problems.push(`${entry.name}: listed as ${entry.side} only but is not one-engine-only`);
+    if (entry.note.trim() === '') problems.push(`${entry.name}: oneEngineOnly needs a note`);
+  }
+  for (const entry of actual) {
+    if (!listedKeys.has(key(entry))) problems.push(`${entry.name}: only on ${entry.side} but not in oneEngineOnly`);
+  }
+  return problems;
+}
+
+export interface CoveragePlan {
+  rows: readonly RowExpectation[];
+  exclusions: readonly Exclusion[];
+  notYetCovered: readonly string[];
+  knownDifferences: readonly KnownDifference[];
+  oneEngineOnly: readonly OneEngineOnly[];
+}
+
+export function printParityCounts(format: string, surface: readonly string[], plan: CoveragePlan): void {
+  console.log([
+    `PARITY-COUNTS ${format}`,
+    `surface=${surface.length}`,
+    `rows=${plan.rows.length}`,
+    `methodsCovered=${new Set(plan.rows.map((row) => row.method)).size}`,
+    `excluded=${plan.exclusions.length}`,
+    `notYetCovered=${plan.notYetCovered.length}`,
+    `errorRows=${plan.rows.filter((row) => row.throws).length}`,
+    `knownDifferences=${plan.knownDifferences.length}`,
+    `oneEngineOnly=${plan.oneEngineOnly.length}`,
+  ].join(' '));
+}
+
+export function coverageProblems(surface: readonly string[], plan: CoveragePlan): string[] {
   const problems: string[] = [];
   const declared = new Set(surface);
   const rowMethods = [...new Set(plan.rows.map((row) => row.method))];
@@ -259,7 +390,36 @@ export function coverageProblems(
     if (names.has(name)) problems.push(`${name}: two rows share this name; give a variant its own name`);
     names.add(name);
     if (row.throws && row.throws.reason.trim() === '') problems.push(`${name}: throws needs a reason`);
+    if (matchesAnyMessage(row.throws?.message)) problems.push(`${name}: throws message matches any error message`);
     if (row.voidReason !== undefined && row.voidReason.trim() === '') problems.push(`${name}: voidReason is empty`);
   }
   return problems;
+}
+
+const HEX_DIGEST = /^[0-9a-f]{16}$/;
+// Four 64-bit halves all fall below 2^53 with odds of 2^-44, so a miss means a narrowed generator.
+const FULL_RANGE_FLOOR = 1n << 53n;
+
+export interface MediaSourcesWire { key: string[]; parts: [string, number][] }
+
+export function measuredSources(engine: EngineSide, sources: MediaSourcesWire, other: MediaSourcesWire) {
+  if (sources.key.length !== other.key.length || sources.parts.length !== other.parts.length) {
+    throw new Error(`two openings drew differently shaped media sources: ${JSON.stringify(sources)} then ${JSON.stringify(other)}`);
+  }
+  for (const [label, wire] of [['first', sources], ['second', other]] as const) {
+    for (const value of [...wire.key, ...wire.parts.map(([digest]) => digest)]) {
+      if (typeof value !== 'string' || !HEX_DIGEST.test(value)) throw new Error(`${engine} ${label} opening drew ${JSON.stringify(value)}, not 16 lowercase hex digits: ${JSON.stringify(wire)}`);
+    }
+  }
+  const drawn = (value: string, again: string | undefined): string | { generated: 'hex64' } => (value !== again ? { generated: 'hex64' } : value);
+  const key = sources.key.map((half, index) => drawn(half, other.key[index]));
+  console.log(`MEDIA-KEY-PROBE ${engine} ${sources.key.join(',')} ${other.key.join(',')} drawn=${key.map((half) => typeof half !== 'string').join(',')}`);
+  if (![...sources.key, ...other.key].some((half) => BigInt(`0x${half}`) >= FULL_RANGE_FLOOR)) {
+    throw new Error(`${engine} drew every media key half below 2^53, not from the full 64-bit range: ${sources.key.join(',')} ${other.key.join(',')}`);
+  }
+  return {
+    ...sources,
+    key,
+    parts: sources.parts.map(([digest, ...entry], index) => [drawn(digest, other.parts[index]?.[0]), ...entry]),
+  };
 }
