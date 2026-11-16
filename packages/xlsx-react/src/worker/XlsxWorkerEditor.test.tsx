@@ -4224,7 +4224,8 @@ describe('peerless workbook worker editor', () => {
         expect(clears).toEqual([]);
         expect(host.sent.map((command) => command.kind)).toEqual(['editCell', 'select']);
         expect(host.cells.get('0:0:0')).toBe('initial');
-        expect(view.getByTestId('xlsx-input-refusal').textContent).toMatch(/clipboard denied/i);
+        expect(view.getByTestId('xlsx-input-refusal').textContent)
+          .toBe('The browser did not allow access to the clipboard.');
         expect(view.queryByTestId('xlsx-error')).toBeNull();
       }
       expect(host.sent[host.sent.length - 1]).toMatchObject({ kind: 'select', payload: { selection: { activeCell: { row: 1, col: 1 } } } });
@@ -4341,7 +4342,8 @@ describe('peerless workbook worker editor', () => {
           else await expect(clipboard.writes[0]).rejects.toMatchObject({ name: 'NotAllowedError' });
           expect(clipboard.copied).toEqual(['"line\nbreak"']);
         }
-        if (outcome === 'refusal') expect(view.getByTestId('xlsx-input-refusal').textContent).toMatch(/clipboard denied/i);
+        if (outcome === 'refusal') expect(view.getByTestId('xlsx-input-refusal').textContent)
+          .toBe('The browser did not allow access to the clipboard.');
         expect(view.queryByTestId('xlsx-error')).toBeNull();
         expect(host.sent).toHaveLength(1);
         fireEvent.change(formula, { target: { value: 'next' } });
@@ -4367,7 +4369,8 @@ describe('peerless workbook worker editor', () => {
     const formula = view.getByTestId('xlsx-formula-input');
     fireEvent.change(formula, { target: { value: 'draft' } });
     await act(async () => fireEvent.keyDown(view.getByTestId('xlsx-scroll'), { key: 'x', ctrlKey: true }));
-    expect(view.getByTestId('xlsx-input-refusal').textContent).toMatch(/clipboard write access/i);
+    expect(view.getByTestId('xlsx-input-refusal').textContent)
+      .toBe('This browser does not allow copying to the clipboard.');
     expect(view.queryByTestId('xlsx-error')).toBeNull();
     expect(clipboardReads(host)).toEqual([]);
     expect(clipboard.write).not.toHaveBeenCalled();
@@ -7186,7 +7189,8 @@ it('keeps the workbook editable and saveable after clipboard permission denial',
   replaceClipboard('readText', mock(async () => { throw new DOMException('Paste denied', 'NotAllowedError'); }));
   fireEvent.keyDown(view.getByTestId('xlsx-scroll'), { key: 'v', ctrlKey: true });
   await advance();
-  expect(view.getByTestId('xlsx-input-refusal').textContent).toContain('Paste denied');
+  expect(view.getByTestId('xlsx-input-refusal').textContent)
+    .toBe('The browser did not allow access to the clipboard.');
   expect(view.queryByTestId('xlsx-error')).toBeNull();
   expect(api.failure).toBeNull();
   expect(host.cells.get('0:0:0')).toBe('valid');
@@ -8710,7 +8714,8 @@ it('restores a pre-hydration cut preview when clipboard writing is refused', asy
   await act(async () => hydration.resolve(host.peer));
   await advance();
   expect(view.queryByTestId('xlsx-commit-preview')).toBeNull();
-  expect(view.getByTestId('xlsx-input-refusal').textContent).toMatch(/clipboard denied/i);
+  expect(view.getByTestId('xlsx-input-refusal').textContent)
+    .toBe('The browser did not allow access to the clipboard.');
   expect(host.cells.get('0:0:0')).toBe('initial');
   expect(host.editMethods.editCells).not.toHaveBeenCalled();
   expect(host.replay).not.toHaveBeenCalled();
@@ -10195,7 +10200,7 @@ describe('workbook worker editor header interactions', () => {
     ]);
   });
 
-  it('dragging a selected column header sends no move op in the legacy editor', async () => {
+  it('moves a selected column header in the legacy editor', async () => {
     const host = harness();
     const applyOps = mock((_ops: unknown[]): EditResult => ({ applied: true, sheetInfo: host.peerMethods.sheetInfo() }));
     Object.assign(host.editMethods, { applyOps });
@@ -10203,14 +10208,20 @@ describe('workbook worker editor header interactions', () => {
     fireEvent.mouseDown(view.getByTestId('xlsx-column-headers').querySelector('[data-col="0"]')!);
     await waitFor(() => expect(selectedAddresses(view)
       .filter((address) => address.startsWith('A'))).toHaveLength(4));
+    const selected = selectedAddresses(view);
     // the harness paints 96px columns: A's label centre is at 48, and 150 is
-    // past B's midpoint (144).
+    // past B's midpoint (144), so the drop lands A immediately before C.
     const band = view.getByTestId('xlsx-column-headers');
     fireEvent.pointerDown(band.querySelector('[data-col="0"]')!, {
       button: 0, clientX: 48, clientY: 0, pointerId: 1 });
     fireEvent.pointerMove(band, { clientX: 150, clientY: 0, pointerId: 1 });
     fireEvent.pointerUp(band, { clientX: 150, clientY: 0, pointerId: 1 });
-    expect(applyOps).not.toHaveBeenCalled();
+    expect(applyOps).toHaveBeenCalledTimes(1);
+    expect(applyOps.mock.calls[0]![0]).toEqual([
+      { type: 'moveCols', sheet: 0, col: 0, count: 1, before: 2 },
+    ]);
+    // the gesture moved the run; the selection's own range never moved.
+    expect(selectedAddresses(view)).toEqual(selected);
   });
 
   // The harness paints A:C, but the drag in these tests runs across D:F and
@@ -10266,7 +10277,7 @@ describe('workbook worker editor header interactions', () => {
     expect(applyOps).not.toHaveBeenCalled();
   });
 
-  it('dragging a header inside a selected run sends no move op in the legacy editor', async () => {
+  it('moves the whole selected legacy run from a track inside it', async () => {
     const host = harness();
     const applyOps = mock((_ops: unknown[]): EditResult => ({ applied: true, sheetInfo: host.peerMethods.sheetInfo() }));
     Object.assign(host.editMethods, { applyOps });
@@ -10277,13 +10288,21 @@ describe('workbook worker editor header interactions', () => {
     fireEvent.mouseDown(columnLabel(view, 0));
     fireEvent.mouseDown(columnLabel(view, 2), { shiftKey: true });
     await waitFor(() => expect(selectedAddresses(view)).toHaveLength(12));
+    const selected = selectedAddresses(view);
+    // B is inside the run, so the press picks A:C up; 337px is just past D's
+    // midpoint, so the run lands in the gap after D, before E.
     fireEvent.pointerDown(columnLabel(view, 1), { button: 0, clientX: 144, clientY: 12, pointerId: 2 });
     fireEvent.pointerMove(band, { clientX: 337, clientY: 12, pointerId: 2 });
     fireEvent.pointerUp(band, { clientX: 337, clientY: 12, pointerId: 2 });
-    expect(applyOps).not.toHaveBeenCalled();
+    expect(applyOps).toHaveBeenCalledTimes(1);
+    expect(applyOps.mock.calls[0]![0]).toEqual([
+      { type: 'moveCols', sheet: 0, col: 0, count: 3, before: 4 },
+    ]);
+    // the gesture moved the run; the selection's own range never moved.
+    expect(selectedAddresses(view)).toEqual(selected);
   });
 
-  it('dragging a selected header past a merged range sends no move in the legacy editor', async () => {
+  it('reports an engine move refusal without failing the legacy workbook', async () => {
     const host = harness();
     let api!: XlsxWorkerEditorApi;
     const applyOps = mock((_ops: unknown[]): EditResult => {
@@ -10299,12 +10318,16 @@ describe('workbook worker editor header interactions', () => {
     const band = view.getByTestId('xlsx-column-headers');
     fireEvent.mouseDown(columnLabel(view, 1));
     await waitFor(() => expect(selectedAddresses(view)).toEqual(['B1', 'B2', 'B3', 'B4']));
-    // B is a whole-column selection; 337px is just past D's midpoint, across B1:C1.
+    // B is a whole-column selection; 337px is just past D's midpoint, so the drop
+    // lands in the gap after D, exactly where the merged range forbids the move.
     fireEvent.pointerDown(columnLabel(view, 1), { button: 0, clientX: 144, clientY: 12, pointerId: 7 });
     fireEvent.pointerMove(band, { clientX: 337, clientY: 12, pointerId: 7 });
     fireEvent.pointerUp(band, { clientX: 337, clientY: 12, pointerId: 7 });
-    expect(applyOps).not.toHaveBeenCalled();
-    expect(view.queryByTestId('xlsx-input-refusal')).toBeNull();
+    expect(applyOps).toHaveBeenCalledTimes(1);
+    expect(applyOps.mock.calls[0]![0]).toEqual([{ type: 'moveCols', sheet: 0, col: 1, count: 1, before: 4 }]);
+    // the refusal names the declined edit and leaves the workbook open and editable.
+    await waitFor(() => expect(view.getByTestId('xlsx-input-refusal').textContent)
+      .toBe("This edit can't be applied here. The workbook is unchanged."));
     expect(view.queryByTestId('xlsx-error')).toBeNull();
     expect(api.failure).toBeNull();
     const editing = api.editCellAsync(0, 0, 1, 'after refusal');
@@ -10313,7 +10336,7 @@ describe('workbook worker editor header interactions', () => {
     expect(host.cells.get('0:0:1')).toBe('after refusal');
   });
 
-  it('dragging a header inside a selected run sends no move op in the peerless editor', async () => {
+  it('moves the whole selected peerless run as one applyOps command', async () => {
     const host = peerlessHarness();
     widen(host.frame);
     const view = await host.mount(undefined, false, { showSheetHeaders: true });
@@ -10321,12 +10344,18 @@ describe('workbook worker editor header interactions', () => {
     fireEvent.mouseDown(columnLabel(view, 0));
     fireEvent.mouseDown(columnLabel(view, 2), { shiftKey: true });
     await waitFor(() => expect(selectedAddresses(view)).toHaveLength(12));
+    const selected = selectedAddresses(view);
     expect(host.sent.filter((command) => command.kind === 'applyOps')).toEqual([]);
+    // B is inside A:C, so the press moves the run; the drop after D puts it
+    // before E in one command with one op.
     fireEvent.pointerDown(columnLabel(view, 1), { button: 0, clientX: 144, clientY: 12, pointerId: 2 });
     fireEvent.pointerMove(band, { clientX: 337, clientY: 12, pointerId: 2 });
     fireEvent.pointerUp(band, { clientX: 337, clientY: 12, pointerId: 2 });
-    await act(async () => {});
-    expect(host.sent.filter((command) => command.kind === 'applyOps')).toEqual([]);
+    await waitFor(() => expect(host.sent.filter((command) => command.kind === 'applyOps')).toHaveLength(1));
+    expect(host.sent.filter((command) => command.kind === 'applyOps')).toEqual([
+      expect.objectContaining({ payload: { args: [[{ type: 'moveCols', sheet: 0, col: 0, count: 3, before: 4 }]] } }),
+    ]);
+    expect(selectedAddresses(view)).toEqual(selected);
   });
 
   it('selects the whole sheet from the corner above the row numbers', async () => {
@@ -10363,10 +10392,10 @@ describe('workbook worker editor header interactions', () => {
   // The marquee is an inset ring rather than an outline, on the snapped cell rect.
   const expectEdgeMarquee = (marquee: HTMLElement, snapped = { x: 0, y: 0, w: 96, h: 24 }) => {
     expect(marquee.style.boxShadow).toBe('inset 0 0 0 1px #217346');
-    expect(marquee.style.left).toBe(`${snapped.x}px`);
-    expect(marquee.style.top).toBe(`${snapped.y}px`);
-    expect(marquee.style.width).toBe(`${snapped.w}px`);
-    expect(marquee.style.height).toBe(`${snapped.h}px`);
+    expect(marquee.style.left).toBe(`${snapped.x - 1}px`);
+    expect(marquee.style.top).toBe(`${snapped.y - 1}px`);
+    expect(marquee.style.width).toBe(`${snapped.w + 1}px`);
+    expect(marquee.style.height).toBe(`${snapped.h + 1}px`);
     expect(marquee.style.outline).toBe('');
     expect(marquee.style.outlineOffset).toBe('');
     expect(marquee.style.background).toBe('');
@@ -10463,7 +10492,7 @@ describe('workbook worker editor header interactions', () => {
       .toEqual([['0px', '0px', '96px', '48px']]);
     expect(fills.every((fill) => fill.style.background === 'rgba(33, 115, 70, 0.12)')).toBe(true);
     expectClear(fills, a3);
-    expect(view.getByTestId('xlsx-selection').style.height).toBe('72px');
+    expect(view.getByTestId('xlsx-selection').style.height).toBe('73px');
     expect(view.getByTestId('xlsx-active-cell').style.height).toBe('26px');
   });
 
@@ -10478,7 +10507,7 @@ describe('workbook worker editor header interactions', () => {
       .toEqual([['0px', '24px', '96px', '48px']]);
     expect(fills.every((fill) => fill.style.background === 'rgba(33, 115, 70, 0.12)')).toBe(true);
     expectClear(fills, a1);
-    expect(view.getByTestId('xlsx-selection').style.height).toBe('72px');
+    expect(view.getByTestId('xlsx-selection').style.height).toBe('73px');
     expect(view.getByTestId('xlsx-active-cell').style.height).toBe('26px');
   });
 });
@@ -10835,7 +10864,7 @@ describe('fill handle with sheet headers', () => {
     const handle = await waitFor(() => view.getByTestId('xlsx-fill-handle'));
     const marquee = view.getByTestId('xlsx-selection');
     expect([marquee.style.left, marquee.style.top, marquee.style.width, marquee.style.height])
-      .toEqual(['96px', '24px', '192px', '48px']);
+      .toEqual(['95px', '23px', '193px', '49px']);
     expect([handle.style.left, handle.style.top]).toEqual(['284px', '68px']);
     expect(parseFloat(handle.style.left) + 4).toBe(parseFloat(marquee.style.left) + parseFloat(marquee.style.width));
     expect(parseFloat(handle.style.top) + 4).toBe(parseFloat(marquee.style.top) + parseFloat(marquee.style.height));

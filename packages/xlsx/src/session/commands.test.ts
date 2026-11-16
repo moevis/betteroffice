@@ -2114,18 +2114,19 @@ describe('workbook commands', () => {
     }
   });
 
-  test('an unsupported column move is an ordinary structural refusal', async () => {
+  test('a column move applies as an ordinary structural edit', async () => {
     const session = await createTestWorkbookSession(bytes);
     try {
-      const saved = await session.save();
       const version = session.confirmedBasis.version;
+      // D:E is the merged D1:E1 run: moving both tracks together carries the
+      // merge, where tearing half of it would be refused.
       expect(await session.submit(command(session, 1, 'applyOps', { args: [[
-        { type: 'moveCols', sheet: 0, col: 3, count: 1, before: 5 },
-      ]] }))).toMatchObject({ status: 'refused', reason: 'unsupported', committed: false,
-        result: { failure: { code: 'unsupported', cause: 'other',
-          message: 'cannot move sheet 0 tracks: moving rows or columns is not supported yet' } } });
-      expect(await session.save()).toEqual(saved);
-      expect(session.confirmedBasis.version).toBe(version);
+        { type: 'moveCols', sheet: 0, col: 3, count: 2, before: 6 },
+      ]] }))).toMatchObject({ status: 'applied', committed: true, result: { applied: true } });
+      expect(session.confirmedBasis.version).not.toBe(version);
+      const saved = await (await JSZip.loadAsync(await session.save()))
+        .file('xl/worksheets/sheet1.xml')!.async('string');
+      expect(saved).toContain('<mergeCell ref="E1:F1"/>');
       expect(await session.submit(command(session, 2, 'editCell', { args: [0, 0, 0, '2'] })))
         .toMatchObject({ status: 'applied', committed: true });
       expect(session.failure).toBeUndefined();

@@ -465,6 +465,7 @@ fn emit_grid_segments(
                     color: color.clone(),
                     style: None,
                     rail: None,
+                    hairline: true,
                     clip: None,
                 });
             };
@@ -954,6 +955,7 @@ where
                 color: text_color.clone(),
                 style: None,
                 rail: None,
+                hairline: false,
                 clip: None,
             });
         }
@@ -1272,6 +1274,7 @@ where
             color: pane_divider_color.clone(),
             style: None,
             rail: None,
+            hairline: true,
             clip: None,
         });
     }
@@ -1285,6 +1288,7 @@ where
             color: pane_divider_color.clone(),
             style: None,
             rail: None,
+            hairline: true,
             clip: None,
         });
     }
@@ -2441,6 +2445,7 @@ fn border_line(x1: f32, y1: f32, x2: f32, y2: f32, edge: &ResolvedBorderEdge) ->
         color: edge.color.clone(),
         style: edge.style.clone(),
         rail: (edge.style.as_deref() == Some("double")).then_some(edge.width / 3.0),
+        hairline: false,
         clip: None,
     }
 }
@@ -3315,8 +3320,16 @@ mod tests {
         let mut sheet = Sheet::new("Sheet1");
         sheet.col_widths.insert(0, 30.0);
         sheet.freeze_pane = Some(FreezePane::new(1, 1, CellRef::new(2, 2)));
-        sheet.set_cell(CellRef::new(1, 1), text_cell("x"));
         let mut wb = Workbook::default();
+        let mut format = wb.styles.cell_format(None);
+        format.border.bottom = Some(BorderEdge {
+            style: BorderStyle::Thin,
+            color: Some(xlsx_model::Color::Rgb("#ff0000".into())),
+        });
+        let style = wb.styles.intern_cell_format(&format).unwrap();
+        let mut cell = text_cell("x");
+        cell.style = style;
+        sheet.set_cell(CellRef::new(1, 1), cell);
         wb.sheets.push(sheet);
 
         let dc = geometry::col_chars_to_px(geometry::DEFAULT_COL_WIDTH_CHARS);
@@ -3346,10 +3359,53 @@ mod tests {
         assert_eq!(dl.grid.col_sizes.len(), dl.grid.col_offsets.len() - 1);
         assert_eq!(dl.grid.row_sizes.len(), dl.grid.row_offsets.len() - 1);
 
-        // the wire serializes the size arrays camelCase.
+        // gridlines and the pane divider are hairlines in sheet space; a real
+        // cell border is not, even when it has no dash style.
+        let lines: Vec<_> = dl
+            .commands
+            .iter()
+            .filter_map(|command| match command {
+                DrawCmd::Line {
+                    color,
+                    hairline,
+                    width,
+                    ..
+                } => Some((&**color, *hairline, *width)),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            lines
+                .iter()
+                .any(|(color, hairline, _)| *hairline && *color == GRIDLINE_COLOR)
+        );
+        assert!(
+            lines.iter().any(|(color, hairline, width)| !*hairline
+                && *color == "#ff0000"
+                && (*width - 1.0).abs() < 0.001),
+            "{lines:?}"
+        );
+        assert!(lines.iter().any(|(color, hairline, width)| *hairline
+            && *color == PANE_DIVIDER_COLOR
+            && (*width - PANE_DIVIDER_WIDTH).abs() < 0.001));
+
+        // the wire keeps `hairline` only on the commands that need it, and
+        // serializes the size arrays camelCase.
         let wire = serde_json::to_value(&dl).unwrap();
         assert!(wire["grid"]["colSizes"][1].as_f64().unwrap() > (dc - 1.0) as f64);
         assert!(wire["grid"]["rowSizes"][1].as_f64().unwrap() > (dr - 1.0) as f64);
+        let wire_lines: Vec<_> = wire["commands"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|command| command["op"] == "line")
+            .collect();
+        assert!(wire_lines.iter().any(|command| command["hairline"] == true));
+        assert!(
+            wire_lines
+                .iter()
+                .any(|command| command["color"] == "#ff0000" && command.get("hairline").is_none())
+        );
     }
 
     #[test]

@@ -130,6 +130,23 @@ interface Fixture {
   charts: ChartRegion[];
 }
 
+/** A copy of `bytes` whose engine model hides the given tracks. */
+function withHiddenTracks(
+  bytes: Uint8Array,
+  hidden: { columns?: number[]; rows?: number[] }
+): Uint8Array {
+  const handle = openWorkbook(bytes);
+  try {
+    handle.applyOps([
+      ...(hidden.columns ?? []).map((col) => ({ type: 'setColsVisibility', sheet: 0, col, count: 1, hidden: true })),
+      ...(hidden.rows ?? []).map((row) => ({ type: 'setRowsVisibility', sheet: 0, row, count: 1, hidden: true })),
+    ]);
+    return handle.save();
+  } finally {
+    handle.dispose();
+  }
+}
+
 function fixtureFrom(bytes: Uint8Array): Fixture {
   const probe = openWorkbook(bytes);
   try {
@@ -393,9 +410,14 @@ describe('XlsxEditor grid pointer handling', () => {
     await waitFor(() => expect(selectedAddresses(view).length).toBe(VIEWPORT_ROWS), MOUNTED);
     expect(selectedAddresses(view).every((address) => address.startsWith('A'))).toBe(true);
     expect(selectedAddresses(view).slice(-1)[0]).toBe(`A${VIEWPORT_ROWS}`);
+    // the ring's box spans the painted rows and one column, covering the
+    // boundary gridlines.
     expect(view.selectionBox()!.style.height).toBe(
-      `${Math.round(plain.grid.rowOffsets[VIEWPORT_ROWS]!) - Math.round(plain.grid.rowOffsets[0]!)}px`);
-    expect(view.selectionBox()!.style.left).toBe('0px');
+      `${Math.round(plain.grid.rowOffsets[VIEWPORT_ROWS]!) - Math.round(plain.grid.rowOffsets[0]!) + 1}px`);
+    // the box starts on the column's own left boundary gridline; the fixture
+    // merges A1:D1, so it widens to cover that merged cell exactly as a cell
+    // drag would.
+    expect(view.selectionBox()!.style.left).toBe('-1px');
     // the selected column fills its own label strongly, so the bands did see
     // the selection; only the opposite axis stays clear.
     const column = grid.querySelector<HTMLElement>('[data-testid="xlsx-column-headers"] [data-col="0"]')!;
@@ -411,15 +433,16 @@ describe('XlsxEditor grid pointer handling', () => {
     const view = await mountWithHeaders();
     view.click({ row: 1, col: 1 });
     const marquee = await waitFor(() => view.selectionBox()!);
-    // a one-pixel inset ring, so the element keeps a zero border. happy-dom keeps the hex as
+    // a one-pixel inset ring, so the element keeps a zero border and the ring
+    // pixels cover the cell's boundary gridlines. happy-dom keeps the hex as
     // written; a browser serializes it as rgb(33, 115, 70).
     expect(marquee.style.boxShadow).toBe('inset 0 0 0 1px #217346');
     expect(marquee.style.border).toBe('');
     const cell = cellRect(plain.grid, 1, 1)!;
-    expect(marquee.style.left).toBe(`${Math.round(cell.x)}px`);
-    expect(marquee.style.top).toBe(`${Math.round(cell.y)}px`);
-    expect(marquee.style.width).toBe(`${Math.round(cell.x + cell.w) - Math.round(cell.x)}px`);
-    expect(marquee.style.height).toBe(`${Math.round(cell.y + cell.h) - Math.round(cell.y)}px`);
+    expect(marquee.style.left).toBe(`${Math.round(cell.x) - 1}px`);
+    expect(marquee.style.top).toBe(`${Math.round(cell.y) - 1}px`);
+    expect(marquee.style.width).toBe(`${Math.round(cell.x + cell.w) - Math.round(cell.x) + 1}px`);
+    expect(marquee.style.height).toBe(`${Math.round(cell.y + cell.h) - Math.round(cell.y) + 1}px`);
     expect(marquee.style.background).toBe('');
     expect(marquee.style.backgroundColor).toBe('');
     // one cell: the two-pixel active-cell ring straddles that same cell's
@@ -527,10 +550,11 @@ describe('XlsxEditor grid pointer handling', () => {
     await waitFor(() => expect(selectedAddresses(view).length).toBe(VIEWPORT_COLUMNS), MOUNTED);
     expect(selectedAddresses(view)).toEqual(
       ['A1', 'B1', 'C1', 'D1', 'E1', 'F1', 'G1', 'H1', 'I1', 'J1']);
+    // one row tall, spanning the painted columns on the boundary gridlines.
     expect(view.selectionBox()!.style.width).toBe(
-      `${Math.round(plain.grid.colOffsets[VIEWPORT_COLUMNS]!) - Math.round(plain.grid.colOffsets[0]!)}px`);
+      `${Math.round(plain.grid.colOffsets[VIEWPORT_COLUMNS]!) - Math.round(plain.grid.colOffsets[0]!) + 1}px`);
     expect(view.selectionBox()!.style.height).toBe(
-      `${Math.round(plain.grid.rowOffsets[1]!) - Math.round(plain.grid.rowOffsets[0]!)}px`);
+      `${Math.round(plain.grid.rowOffsets[1]!) - Math.round(plain.grid.rowOffsets[0]!) + 1}px`);
   });
 
   it('selects the whole sheet from the corner above the row numbers', async () => {
@@ -573,11 +597,13 @@ describe('XlsxEditor grid pointer handling', () => {
     expect(selectedAddresses(view).slice(0, 3)).toEqual(['A1', 'B1', 'C1']);
   });
 
-  it('dragging a selected column header sends no move op', async () => {
+  it('reorders a dragged column with one engine move op', async () => {
     const view = await mountWithHeaders();
     const band = view.surface.closest('[data-testid="xlsx-grid"]')!
       .querySelector('[data-testid="xlsx-column-headers"]')!;
     const applyOps = spyOn(view.workbook(), 'applyOps');
+    // the band only picks up a header the selection already covers in full, so
+    // the press on F first selects its whole column.
     fireEvent.mouseDown(band.querySelector('[data-col="5"]')!);
     await waitFor(() => expect(selectedAddresses(view)
       .filter((address) => address.startsWith('F'))).toHaveLength(VIEWPORT_ROWS), MOUNTED);
@@ -588,7 +614,10 @@ describe('XlsxEditor grid pointer handling', () => {
       button: 0, clientX: start, clientY: 5, pointerId: 1 });
     fireEvent.pointerMove(band, { clientX: drop, clientY: 5, pointerId: 1 });
     fireEvent.pointerUp(band, { clientX: drop, clientY: 5, pointerId: 1 });
-    expect(applyOps).not.toHaveBeenCalled();
+    expect(applyOps).toHaveBeenCalledTimes(1);
+    expect(applyOps.mock.calls[0]![0]).toEqual([
+      { type: 'moveCols', sheet: 0, col: 5, count: 1, before: 7 },
+    ]);
   });
 
   it('extends the whole-column selection track by track when a label is dragged', async () => {
@@ -619,21 +648,35 @@ describe('XlsxEditor grid pointer handling', () => {
     expect(applyOps).not.toHaveBeenCalled();
   });
 
-  it('dragging a header inside a selected run sends no move op', async () => {
+  it('reorders instead of extending when the pressed header is already selected', async () => {
     const view = await mountWithHeaders();
     const band = columnBand(view);
     fireEvent.mouseDown(band.querySelector('[data-col="0"]')!);
     fireEvent.mouseDown(band.querySelector('[data-col="2"]')!, { shiftKey: true });
     await waitFor(() => expect(selectedAddresses(view)).toHaveLength(VIEWPORT_ROWS * 3), MOUNTED);
     const applyOps = spyOn(view.workbook(), 'applyOps');
+    const ring = () => {
+      const box = view.selectionBox()!;
+      return [box.style.left, box.style.top, box.style.width, box.style.height];
+    };
+    const ringBefore = ring();
 
-    // B lies inside the fully selected A:C run and drops past D's midpoint.
+    // B is covered by A:C in full, so the press picks the run up; dropping just
+    // past D's midpoint lands it in the gap after D, before E (band position 4).
     fireEvent.pointerDown(band.querySelector('[data-col="1"]')!, {
       button: 0, clientX: columnPoint(1), clientY: 5, pointerId: 1 });
     fireEvent.pointerMove(band, { clientX: columnPoint(3) + 1, clientY: 5, pointerId: 1 });
     fireEvent.pointerUp(band, { clientX: columnPoint(3) + 1, clientY: 5, pointerId: 1 });
 
-    expect(applyOps).not.toHaveBeenCalled();
+    // one move op for the whole run, one undo step, addressed in pre-move
+    // sheet coordinates; hidden tracks inside the run travel with it.
+    expect(applyOps).toHaveBeenCalledTimes(1);
+    expect(applyOps.mock.calls[0]![0]).toEqual([
+      { type: 'moveCols', sheet: 0, col: 0, count: 3, before: 4 },
+    ]);
+    // the gesture moved a track; the selection's own range never moved.
+    expect(selectedAddresses(view)).toHaveLength(VIEWPORT_ROWS * 3);
+    expect(ring()).toEqual(ringBefore);
   });
 
   it('resizes a whole selected column run as one batch of width ops', async () => {
@@ -806,6 +849,47 @@ describe('XlsxEditor grid pointer handling', () => {
     expect(applyOps).toHaveBeenCalledTimes(1);
     expect(applyOps.mock.calls[0]![0]).toEqual([
       { type: 'setFreezePane', sheet: 0, pane: { rows: 0, cols: 1, top_left: { row: 0, col: 1 } } },
+    ]);
+  });
+
+  it('unhides the hidden column from its band handle', async () => {
+    const view = await mountWithHeaders(fixtureFrom(withHiddenTracks(plain.bytes, { columns: [4] })));
+    const handle = view.view.container.querySelector<HTMLElement>(
+      '[data-testid="xlsx-hidden-handle"][data-axis="col"]')!;
+    expect(handle).not.toBeNull();
+    const applyOps = spyOn(view.workbook(), 'applyOps');
+    fireEvent.click(handle);
+    // one range op, one batch, so the reveal is one undo step.
+    expect(applyOps).toHaveBeenCalledTimes(1);
+    expect(applyOps.mock.calls[0]![0]).toEqual([
+      { type: 'setColsVisibility', sheet: 0, col: 4, count: 1, hidden: false },
+    ]);
+  });
+
+  it('unhides a hidden run from its band handle as one range op', async () => {
+    const view = await mountWithHeaders(fixtureFrom(withHiddenTracks(plain.bytes, { columns: [4, 5] })));
+    const handle = view.view.container.querySelector<HTMLElement>(
+      '[data-testid="xlsx-hidden-handle"][data-axis="col"]')!;
+    expect(handle.dataset.start).toBe('4');
+    expect(handle.dataset.end).toBe('5');
+    const applyOps = spyOn(view.workbook(), 'applyOps');
+    fireEvent.click(handle);
+    expect(applyOps).toHaveBeenCalledTimes(1);
+    expect(applyOps.mock.calls[0]![0]).toEqual([
+      { type: 'setColsVisibility', sheet: 0, col: 4, count: 2, hidden: false },
+    ]);
+  });
+
+  it('unhides the hidden row from its band handle', async () => {
+    const view = await mountWithHeaders(fixtureFrom(withHiddenTracks(plain.bytes, { rows: [6] })));
+    const handle = view.view.container.querySelector<HTMLElement>(
+      '[data-testid="xlsx-hidden-handle"][data-axis="row"]')!;
+    expect(handle).not.toBeNull();
+    const applyOps = spyOn(view.workbook(), 'applyOps');
+    fireEvent.click(handle);
+    expect(applyOps).toHaveBeenCalledTimes(1);
+    expect(applyOps.mock.calls[0]![0]).toEqual([
+      { type: 'setRowsVisibility', sheet: 0, row: 6, count: 1, hidden: false },
     ]);
   });
 
@@ -1201,8 +1285,8 @@ describe('fill handle with sheet headers', () => {
     await waitFor(() => expect(view.nameBox().value).toBe('C3'));
     const corner = cellRect(plain.grid, 2, 2)!;
     const marquee = view.selectionBox()!;
-    expect(marquee.style.left).toBe(`${Math.round(cellRect(plain.grid, 1, 1)!.x)}px`);
-    expect(marquee.style.top).toBe(`${Math.round(cellRect(plain.grid, 1, 1)!.y)}px`);
+    expect(marquee.style.left).toBe(`${Math.round(cellRect(plain.grid, 1, 1)!.x) - 1}px`);
+    expect(marquee.style.top).toBe(`${Math.round(cellRect(plain.grid, 1, 1)!.y) - 1}px`);
     const handle = fillHandleElement(view);
     expect(parseFloat(handle.style.left)).toBeCloseTo(corner.x + corner.w - 4);
     expect(parseFloat(handle.style.top)).toBeCloseTo(corner.y + corner.h - 4);
@@ -2331,7 +2415,7 @@ describe('XlsxEditor host integration', () => {
     }
   });
 
-  it('applies an accepted paste and sends no move for a header drag made while it reads', async () => {
+  it('applies a header move after an accepted paste still reading the clipboard', async () => {
     // the fixture merges A1:D1, which refuses a column move across it.
     const prepared = openWorkbook(plain.bytes.slice());
     let file: Uint8Array;
@@ -2383,13 +2467,18 @@ describe('XlsxEditor host integration', () => {
       fireEvent.pointerMove(band, { clientX: drop, clientY: 5, pointerId: 1 });
       fireEvent.pointerUp(band, { clientX: drop, clientY: 5, pointerId: 1 });
 
+      // the accepted move waits for the paste instead of landing on the old cells.
       expect(applyOps).not.toHaveBeenCalled();
       expect(row()).toEqual(['10', '20', '', '40', '50']);
 
       await act(async () => resolveClipboard('99'));
 
-      await waitFor(() => expect(row()).toEqual(['10', '99', '', '40', '50']));
-      expect(applyOps).not.toHaveBeenCalled();
+      // paste, then move: B keeps the blank C, and its old value travels to D.
+      await waitFor(() => expect(row()).toEqual(['10', '', '40', '99', '50']));
+      expect(applyOps).toHaveBeenCalledTimes(1);
+      expect(applyOps.mock.calls[0]![0]).toEqual([
+        { type: 'moveCols', sheet: 0, col: 1, count: 1, before: 4 },
+      ]);
     } finally {
       if (originalClipboard) Object.defineProperty(navigator, 'clipboard', originalClipboard);
       else Reflect.deleteProperty(navigator, 'clipboard');

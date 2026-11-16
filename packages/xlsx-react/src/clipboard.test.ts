@@ -255,6 +255,8 @@ describe('clipboard guard', () => {
       });
       await expect(readClipboardText()).rejects.toBeInstanceOf(ClipboardRefusalError);
       await expect(writeClipboardText('cells')).rejects.toMatchObject({ unavailable: 'unsupported' });
+      const writeFailure = await writeClipboardText('cells').catch((error: unknown) => error);
+      expect(clipboardRefusalMessage(writeFailure, (key) => key)).toBe('commands.reasons.clipboardWriteUnavailable');
       await expect(writeClipboard(() => ({} as ClipboardItem))).rejects.toMatchObject({ unavailable: 'unsupported' });
     } finally { restore(); }
   });
@@ -265,6 +267,8 @@ describe('clipboard guard', () => {
     try {
       await expect(readCellClipboard()).rejects.toMatchObject({ unavailable: 'insecure', code: 'clipboard-unavailable' });
       await expect(writeClipboardText('cells')).rejects.toMatchObject({ unavailable: 'insecure' });
+      const insecure = await writeClipboardText('cells').catch((error: unknown) => error);
+      expect(clipboardRefusalMessage(insecure, (key) => key)).toBe('commands.reasons.clipboardInsecure');
     } finally { restore(); }
   });
 

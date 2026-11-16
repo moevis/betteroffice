@@ -199,6 +199,8 @@
       "lastSheet": "Un libro necesita al menos una hoja.",
       "sheetAtEdge": "La hoja no se puede mover más.",
       "sheetNameInvalid": "Los nombres de hoja necesitan de 1 a 31 caracteres, deben ser únicos y no pueden contener : \\ / ? * [ ].",
+      "clipboardInsecure": "El portapapeles necesita una página segura (HTTPS).",
+      "clipboardWriteUnavailable": "Este navegador no permite copiar al portapapeles.",
       "clipboardDenied": "El navegador no permitió el acceso al portapapeles."
     },
     "cut": "Cortar",

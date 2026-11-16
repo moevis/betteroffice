@@ -60,6 +60,10 @@ import { ProposalsPanel } from '../proposals/ProposalsPanel';
 import { cellInViewport, coversWholeTrack, deriveLimits, expandRangeToMergedCells, extendScrollExtent, laidOutCellRect, nearestCellScroll, positionAtPoint, scaledRect } from '../viewer/sessionGeometry';
 import { cellEditorColors } from '../viewer/cellEditorColors';
 import { ACTIVE_CELL_WIDTH, marqueeBox, marqueeFills, MARQUEE_COLOR, MARQUEE_WIDTH, SELECTION_FILL } from '../selectionOutline';
+import {
+  clipboardRefusalMessage, ClipboardRefusalError, clipboardUnavailable, readClipboardText, writeClipboard,
+  writeClipboardText,
+} from '../clipboard';
 import type { WorkerEditorApiBridge } from './createWorkerEditorApi';
 
 import { useLegacySessionWorkbook, EditableWorkbookSession, type EditableSessionWorkbookProps } from './useEditableSessionWorkbook';
@@ -137,6 +141,8 @@ function revealAxis(position: number, size: number, frozen: boolean, scroll: num
 
 export function LegacyXlsxWorkerEditor(props: EditableSessionWorkbookProps) {
   const { t, lang } = useTranslation();
+  const tRef = useRef(t);
+  tRef.current = t;
   const rootRef = useRef<HTMLDivElement>(null);
   usePluginGestures(rootRef);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -198,6 +204,8 @@ export function LegacyXlsxWorkerEditor(props: EditableSessionWorkbookProps) {
   const settledDraftRevision = useRef(0);
   const focus = useCallback(() => scrollRef.current?.focus({ preventScroll: true }), []);
   const reportInputError = useCallback((error: unknown) => {
+    const clipboard = clipboardRefusalMessage(error, tRef.current);
+    if (clipboard) { setRefusal(clipboard); return; }
     const local = inputRefusal(error);
     if (local || error instanceof XlsxCommandAdmissionError) {
       setRefusal((local ?? error as Error).message);
@@ -241,7 +249,7 @@ export function LegacyXlsxWorkerEditor(props: EditableSessionWorkbookProps) {
     canvas.height = Math.round(request.height * request.dpr);
     canvas.style.width = `${request.width}px`;
     canvas.style.height = `${request.height}px`;
-    const settled = paintWithDefaultFonts(displayList, () => paintDisplayList(context, displayList, request.dpr * request.zoom));
+    const settled = paintWithDefaultFonts(displayList, () => paintDisplayList(context, displayList, request.dpr * request.zoom, { x: 0, y: 0 }, request.zoom));
     heldPreview.current = settled ? null : { canvas, displayList, request };
     canvas.dataset.previewReady = settled ? 'true' : 'pending';
   };
@@ -780,7 +788,7 @@ export function LegacyXlsxWorkerEditor(props: EditableSessionWorkbookProps) {
         canvas.style.width = `${request.width}px`;
         canvas.style.height = `${request.height}px`;
         canvas.dataset.defaultFonts = paintWithDefaultFonts(painted.displayList,
-          () => paintDisplayList(context, painted.displayList, request.dpr * request.zoom)) ? 'settled' : 'pending';
+          () => paintDisplayList(context, painted.displayList, request.dpr * request.zoom, { x: 0, y: 0 }, request.zoom)) ? 'settled' : 'pending';
         canvas.dataset.workerSequence = String(painted.sequence);
         canvas.dataset.paintSource = painted.source;
         canvas.dataset.workerZoom = String(request.zoom);
@@ -1105,23 +1113,29 @@ export function LegacyXlsxWorkerEditor(props: EditableSessionWorkbookProps) {
     const usedRange = () => run!.peer?.selectionData(sheet, 0, 0, 'usedRange').usedRange;
     let clipboardWrite: { resolve(payload: Blob): void; reject(error: unknown): void; done: Promise<boolean> } | undefined;
     if (kind !== 'paste') {
-      if (typeof ClipboardItem !== 'function' || typeof navigator.clipboard.write !== 'function') {
-        if (kind === 'cut') { reportInputError(new WorkerInputRefusal('Cut requires clipboard write access')); return; }
+      const writeRefusal = typeof ClipboardItem === 'function' ? clipboardUnavailable('write') : 'unsupported';
+      if (writeRefusal) {
+        if (kind === 'cut') { reportInputError(new ClipboardRefusalError(writeRefusal, 'write')); return; }
       } else {
         let resolve!: (payload: Blob) => void;
         let reject!: (error: unknown) => void;
         const payload = new Promise<Blob>((done, failed) => { resolve = done; reject = failed; });
         void payload.catch(() => {});
         try {
-          const done = navigator.clipboard.write([new ClipboardItem({ 'text/plain': payload })]).then(
-            () => true, (error) => { reject(error); throw new WorkerInputRefusal(error instanceof Error ? error.message : 'Clipboard write failed', kind === 'cut'); }
+          const done = writeClipboard(() => new ClipboardItem({ 'text/plain': payload })).then(
+            () => true, (error) => {
+              const refusal = error instanceof ClipboardRefusalError
+                ? new ClipboardRefusalError(error.unavailable, error.method, kind === 'cut') : error;
+              reject(refusal);
+              throw refusal;
+            }
           );
           void done.catch(() => {});
           clipboardWrite = { resolve, reject, done };
-        } catch (error) { reject(error); reportInputError(new WorkerInputRefusal(error instanceof Error ? error.message : 'Clipboard write failed')); return; }
+        } catch (error) { reject(error); reportInputError(error); return; }
       }
     }
-    const captureClipboard = () => kind === 'paste' ? navigator.clipboard.readText() : '';
+    const captureClipboard = () => kind === 'paste' ? readClipboardText() : '';
     let mutation: Extract<WorkbookReplayOp, { method: 'editCells' }> | undefined;
     let discardPreview: (() => Promise<void>) | undefined;
     let clipboardRefusal: unknown;
@@ -1156,8 +1170,7 @@ export function LegacyXlsxWorkerEditor(props: EditableSessionWorkbookProps) {
           clipboardWrite.resolve(new Blob([copied], { type: 'text/plain' }));
           written = await clipboardWrite.done;
         } else {
-          try { await navigator.clipboard.writeText(copied); written = true; }
-          catch (error) { throw new WorkerInputRefusal(error instanceof Error ? error.message : 'Clipboard write failed'); }
+          await writeClipboardText(copied); written = true;
         }
         if (!owner.current) throw new XlsxCommandAdmissionError('document-replaced');
         markApplied.check();
@@ -2052,10 +2065,32 @@ export function LegacyXlsxWorkerEditor(props: EditableSessionWorkbookProps) {
       ? { type: 'setColWidth', sheet, col: index, width: columnWidthFromPx(size) }
       : { type: 'setRowHeight', sheet, row: index, height: rowHeightFromPx(size) });
   };
+  const onHeaderReorder = (axis: 'col' | 'row', at: number, before: number, count: number) => {
+    if (!acceptInput()) return;
+    const painted = sourceRef.current?.painted;
+    if (!painted || painted.request.sheet !== activeRef.current) return;
+    // the band reports sheet indices in pre-move coordinates, so the op takes
+    // them as-is; `count` is the selection's span, hidden tracks included.
+    const sheet = activeRef.current;
+    // one op keeps the move a single undo step.
+    applyStructuralOp(axis === 'col'
+      ? { type: 'moveCols', sheet, col: at, count, before }
+      : { type: 'moveRows', sheet, row: at, count, before });
+  };
+  const onHeaderUnhide = (axis: 'col' | 'row', spans: [number, number][]) => {
+    const painted = sourceRef.current?.painted;
+    if (!painted || painted.request.sheet !== activeRef.current) return;
+    const sheet = activeRef.current;
+    const ops = spans.map(([start, end]) => axis === 'col'
+      ? { type: 'setColsVisibility', sheet, col: start, count: end - start + 1, hidden: false }
+      : { type: 'setRowsVisibility', sheet, row: start, count: end - start + 1, hidden: false });
+    // one batch keeps a whole handle press a single undo step.
+    if (ops.length > 0) applyStructuralOps(ops);
+  };
   // keyed on the session for the same reason the peerless editor is: the first
   // render has no session, and a `[]` memo would pin handlers bound to it.
   const headerHandlers = useMemo<SheetGridHeaderHandlers>(() => ({
-    onHeaderMouseDown, onHeaderResize, onSelectAll, onHeaderPress: dropChart,
+    onHeaderMouseDown, onHeaderResize, onHeaderReorder, onHeaderUnhide, onSelectAll, onHeaderPress: dropChart,
     // a drag from an unselected header extends from the anchor the press set;
     // the press already committed the draft and took focus.
     onHeaderDragSelect: (axis, index) => {
@@ -2190,7 +2225,8 @@ export function LegacyXlsxWorkerEditor(props: EditableSessionWorkbookProps) {
                 painted={pluginHost.painted} zoom={zoom} top={props.showSheetHeaders ? COLUMN_HEADER_HEIGHT : 0} />}
               <SheetGrid frame={frame} zoom={paintedZoom} leadingInset={pluginHost.rowGutter ? ROW_GUTTER_WIDTH * zoom : 0} showSheetHeaders={headers} headerHandlers={headerHandlers} selection={selection}
                 sheet={painted?.request.sheet}
-                selectAllLabel={t('commands.selectAll')}>
+                selectAllLabel={t('commands.selectAll')}
+                unhideLabels={{ col: t('commands.unhideColumns'), row: t('commands.unhideRows') }}>
               <div ref={scrollRef} data-testid="xlsx-scroll" tabIndex={0} onKeyDown={onKeyDown}
                 onMouseDown={onMouseDown} onMouseMove={onMouseMove} onClick={onClick}
                 onDoubleClick={(event) => {

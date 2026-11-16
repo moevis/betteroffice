@@ -63,7 +63,10 @@ import type {
 } from '@betteroffice/xlsx';
 import type { AwarenessPeer, CollaborationReplica } from '@betteroffice/xlsx/collaboration';
 import { XLSX_MAX_COLUMNS, XLSX_MAX_ROWS } from './sheetLimits';
-import { CellClipboard, clipboardMarker, parseCellClipboardText, readCellClipboard } from './clipboard';
+import {
+  CellClipboard, clipboardMarker, clipboardRefusalMessage, clipboardUnavailable, parseCellClipboardText,
+  readCellClipboard, writeClipboard, writeClipboardText,
+} from './clipboard';
 import { chartResizeRect, chartResizeSpace, type ChartDragPreview, type SelectedChart } from './worker/chartResize';
 import { ChartResizeHandles } from './worker/ChartResizeHandles';
 import { useChartResizeGesture } from './worker/useChartResizeGesture';
@@ -1275,7 +1278,7 @@ export function XlsxEditorContent({
       } catch {}
     }
     try {
-      canvas.dataset.defaultFonts = paintWithDefaultFonts(dl, () => paintDisplayList(ctx, dl, dpr * zoom))
+      canvas.dataset.defaultFonts = paintWithDefaultFonts(dl, () => paintDisplayList(ctx, dl, dpr * zoom, { x: 0, y: 0 }, zoom))
         ? 'settled' : 'pending';
     } catch (paintError) {
       failPaint(paintError);
@@ -1923,20 +1926,20 @@ export function XlsxEditorContent({
     const token = cellClipboard.begin();
     try {
       const { range, cells } = copiedCells(target);
-      const marked = !cut && typeof ClipboardItem === 'function' && typeof navigator.clipboard.write === 'function';
-      if (marked) await navigator.clipboard.write([new ClipboardItem({
+      const marked = !cut && typeof ClipboardItem === 'function' && clipboardUnavailable('write') === null;
+      if (marked) await writeClipboard(() => new ClipboardItem({
         'text/plain': new Blob([toTsv(cells)], { type: 'text/plain' }), 'text/html': clipboardMarker(token, toTsv(cells)),
-      })]);
-      else await navigator.clipboard.writeText(toTsv(cells));
+      }));
+      else await writeClipboardText(toTsv(cells));
       if (marked && handleRef.current === handle) {
         cellClipboard.capture(token, { owner: handle, sheet, range, cells, cut: false }, marked);
       }
       return true;
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(clipboardRefusalMessage(e, t) ?? (e instanceof Error ? e.message : String(e)));
       return false;
     }
-  }, [cellClipboard]);
+  }, [cellClipboard, t]);
 
   const copySelection = useCallback(async () => {
     const target = captureTarget();
@@ -1962,18 +1965,11 @@ export function XlsxEditorContent({
         return null;
       }
     };
-    const writeText = (text: string): Promise<void> => {
-      try {
-        return navigator.clipboard.writeText(text);
-      } catch (e) {
-        return Promise.reject(e);
-      }
-    };
     const clear = async (written: Promise<void>, cleared: CellInputEdit[]) => {
       try {
         await written;
       } catch (e) {
-        setError(e instanceof Error ? e.message : String(e));
+        setError(clipboardRefusalMessage(e, t) ?? (e instanceof Error ? e.message : String(e)));
         return;
       }
       if (!current()) return;
@@ -1989,7 +1985,7 @@ export function XlsxEditorContent({
       const decided = decide();
       if (!decided) return;
       cellClipboard.begin();
-      const written = writeText(decided.text);
+      const written = writeClipboardText(decided.text);
       void written.catch(() => {});
       void coordinator.input(() => clear(written, decided.cleared));
       return;
@@ -1999,9 +1995,9 @@ export function XlsxEditorContent({
     const payload = new Promise<Blob>((done, fail) => { resolve = done; reject = fail; });
     void payload.catch(() => {});
     let write: Promise<void> | null = null;
-    if (typeof ClipboardItem === 'function' && typeof navigator.clipboard?.write === 'function') {
+    if (typeof ClipboardItem === 'function' && clipboardUnavailable('write') === null) {
       try {
-        write = navigator.clipboard.write([new ClipboardItem({ 'text/plain': payload })]);
+        write = writeClipboard(() => new ClipboardItem({ 'text/plain': payload }));
         void write.catch(() => {});
       } catch {
         write = null;
@@ -2015,9 +2011,9 @@ export function XlsxEditorContent({
       }
       cellClipboard.begin();
       if (write) resolve(new Blob([decided.text], { type: 'text/plain' }));
-      return clear(write ?? writeText(decided.text), decided.cleared);
+      return clear(write ?? writeClipboardText(decided.text), decided.cleared);
     });
-  }, [captureTarget, cellClipboard, copyTarget, gatedClear, applyResult, readOnly, coordinator]);
+  }, [captureTarget, cellClipboard, copyTarget, gatedClear, applyResult, readOnly, coordinator, t]);
 
   const pasteSelection = useCallback((plain = false) => {
     const handle = handleRef.current;
@@ -2031,7 +2027,7 @@ export function XlsxEditorContent({
         const data = await readCellClipboard();
         return plain ? { text: data.text, html: null } : data;
       } catch (e) {
-        setError(e instanceof Error ? e.message : String(e));
+        setError(clipboardRefusalMessage(e, t) ?? (e instanceof Error ? e.message : String(e)));
         return null;
       }
     })();
@@ -2364,6 +2360,36 @@ export function XlsxEditorContent({
     [applyHeaderOps]
   );
 
+  /** A committed label drag: move the selected run to the gap the band reported. */
+  const reorderHeaderTrack = useCallback(
+    (axis: 'col' | 'row', at: number, before: number, count: number) => {
+      const painted = paintedRef.current;
+      if (!painted || painted.sheet !== activeSheetRef.current) return;
+      // the band reports sheet indices in pre-move coordinates, so the op takes
+      // them as-is; `count` is the selection's span, hidden tracks included.
+      // One op keeps the move a single undo step.
+      applyHeaderOps([axis === 'col'
+        ? { type: 'moveCols', sheet: painted.sheet, col: at, count, before }
+        : { type: 'moveRows', sheet: painted.sheet, row: at, count, before }]);
+    },
+    [applyHeaderOps]
+  );
+
+  /** Reveal the hidden spans the painted band marked, as one undoable edit. */
+  const unhideHeaderTracks = useCallback(
+    (axis: 'col' | 'row', spans: [number, number][]): void => {
+      const painted = paintedRef.current;
+      if (!painted || painted.sheet !== activeSheetRef.current) return;
+      const sheet = painted.sheet;
+      const ops: unknown[] = spans.map(([start, end]) => axis === 'col'
+        ? { type: 'setColsVisibility', sheet, col: start, count: end - start + 1, hidden: false }
+        : { type: 'setRowsVisibility', sheet, row: start, count: end - start + 1, hidden: false });
+      // one batch keeps a whole handle press a single undo step.
+      if (ops.length > 0) applyHeaderOps(ops);
+    },
+    [applyHeaderOps]
+  );
+
   const dropChart = useCallback(() => {
     chartDragRef.current = null;
     cancelChartResize();
@@ -2390,8 +2416,10 @@ export function XlsxEditorContent({
       selectHeaderTrack(axis, index, 'extend');
     },
     onHeaderResize: resizeHeaderTrack,
+    onHeaderReorder: reorderHeaderTrack,
+    onHeaderUnhide: unhideHeaderTracks,
     onSelectAll: selectAll,
-  }), [dropChart, selectHeaderTrack, resizeHeaderTrack, selectAll, focusContainer]);
+  }), [dropChart, selectHeaderTrack, resizeHeaderTrack, reorderHeaderTrack, unhideHeaderTracks, selectAll, focusContainer]);
 
   const headerMenu = useContextMenu({
     // the bands are siblings of the scroller, so their contextmenu never
@@ -3034,7 +3062,8 @@ export function XlsxEditorContent({
           <SheetGrid frame={frame} zoom={zoom} leadingInset={pluginHost.rowGutter ? ROW_GUTTER_WIDTH * zoom : 0}
             showSheetHeaders={showSheetHeaders}
             headerHandlers={headerHandlers} selection={selection} sheet={activeSheet}
-            selectAllLabel={t('commands.selectAll')}>
+            selectAllLabel={t('commands.selectAll')}
+            unhideLabels={{ col: t('commands.unhideColumns'), row: t('commands.unhideRows') }}>
           <div
             ref={scrollRef}
             data-testid="xlsx-scroll"

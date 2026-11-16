@@ -35,11 +35,12 @@ const hidden: CSSProperties = {
  * state. Subscribe here so the header bands advance with the same painted
  * frame the canvas is showing instead of freezing at the first paint.
  */
-export const PeerlessSheetGrid = memo(function PeerlessSheetGrid({ store, active, leadingInset = 0, headerHandlers, selectAllLabel, showSheetHeaders = false, children }: {
+export const PeerlessSheetGrid = memo(function PeerlessSheetGrid({ store, active, leadingInset = 0, headerHandlers, selectAllLabel, unhideLabels, showSheetHeaders = false, children }: {
   store: WorkerPresentationStore; active: number; leadingInset?: number;
   showSheetHeaders?: boolean;
   headerHandlers?: SheetGridHeaderHandlers;
-  selectAllLabel?: string; children: ReactNode;
+  selectAllLabel?: string;
+  unhideLabels?: { col: string; row: string }; children: ReactNode;
 }) {
   const painted = useWorkerPresentation(store, selectPainted);
   // the headers follow the same gated sheet as the paint: a stale selection from
@@ -50,6 +51,7 @@ export const PeerlessSheetGrid = memo(function PeerlessSheetGrid({ store, active
     zoom={painted?.request.zoom ?? 1} leadingInset={leadingInset} showSheetHeaders={showSheetHeaders} headerHandlers={headerHandlers}
     sheet={paintedSheet}
     selectAllLabel={selectAllLabel}
+    unhideLabels={unhideLabels}
     selection={painted?.request.sheet === active ? selection : null}>{children}</SheetGrid>;
 });
 export const PeerlessWorkerExtent = memo(function PeerlessWorkerExtent({ store, zoom }: {

@@ -13,6 +13,8 @@ name = "xlsx_engine"
 default = ["raster"]
 raster = ["betteroffice-xlsx/raster"]
 fonts = ["betteroffice-xlsx/fonts"]
+unstable-track-moves = ["betteroffice-xlsx/unstable-track-moves"]
+unstable-track-visibility = ["betteroffice-xlsx/unstable-track-visibility"]
 
 [dependencies]
 betteroffice-xlsx = { workspace = true, default-features = false }

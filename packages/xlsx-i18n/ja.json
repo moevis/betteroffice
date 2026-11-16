@@ -199,6 +199,8 @@
       "lastSheet": "ブックには少なくとも 1 つのシートが必要です。",
       "sheetAtEdge": "シートをこれ以上移動できません。",
       "sheetNameInvalid": "シート名は 1～31 文字で一意である必要があり、: \\ / ? * [ ] は使用できません。",
+      "clipboardInsecure": "クリップボードには安全な (HTTPS) ページが必要です。",
+      "clipboardWriteUnavailable": "このブラウザーではクリップボードにコピーできません。",
       "clipboardDenied": "ブラウザーでクリップボードへのアクセスが許可されませんでした。"
     },
     "cut": "切り取り",
