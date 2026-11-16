@@ -31,7 +31,7 @@ import type {
   YrsResidentCaretSnapshot,
   YrsResidentWorkerSnapshot,
   YrsSelection,
-  YrsSelectionText,
+  YrsSelectionInfo,
   YrsStickyPosition,
 } from './index';
 import type { DocxClipboardSlice } from './clipboardFragment';
@@ -193,7 +193,7 @@ export interface DocxDocumentReadValues {
   paragraphIdentities: DocxParagraphIdentitySnapshot;
   resolveParagraphAnchors: { results: DocxParagraphAnchorResult[] };
   readParagraphs: DocxReadParagraphsResult;
-  rawSelectionInfo: YrsSelectionText;
+  rawSelectionInfo: YrsSelectionInfo;
   clipboardSlice: DocxClipboardSlice;
   listStories: DocxListStoriesResult;
   readStories: DocxReadStoriesResult;

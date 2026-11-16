@@ -658,3 +658,56 @@ test('a user revision after a swap can auto-open the sidebar again', async () =>
   expect(sidebar.filter(Boolean)).toHaveLength(2);
   expect(ref.current!.commands.getState('commentsSidebar').active).toBe(true);
 }, 15_000);
+
+test('hidden review hides revision cards and sidebar space but keeps comments, then restores cards', async () => {
+  const sidebar: boolean[] = [];
+  const ref = createRef<DocxEditorRef>();
+  const buffer = fixture('Hello world', true);
+  const comment = { id: 1, author: 'Reader', content: [] };
+  const reply = { id: 2, author: 'Reviewer', content: [], parentId: 1 };
+  const element = (display: 'cards' | 'hidden', comments: NonNullable<DocxEditorBaseProps['comments']> = []) => (
+    <DocxEditor
+      experimentalWorkerOpen={false}
+      ref={ref}
+      documentBuffer={buffer}
+      trackedChanges={{ display }}
+      comments={comments}
+      onCommentsSidebarOpenChange={(open) => sidebar.push(open)}
+    />
+  );
+  const view = render(element('hidden'));
+  await until(
+    () =>
+      ref.current?.commands.getState('save').enabled === true &&
+      view.container.querySelector('.docx-unified-sidebar') == null
+  );
+  expect(view.container.querySelectorAll('.docx-tracked-change-card, .docx-review-dot, .docx-review-summary')).toHaveLength(0);
+  expect(sidebar).toHaveLength(0);
+  view.rerender(element('cards'));
+  await until(
+    () =>
+      ref.current?.commands.getState('save').enabled === true &&
+      view.container.querySelector('.docx-tracked-change-card') != null
+  );
+  const session = ref.current!.getEditorRef()!.getYrsSession()!;
+  const version = session.version();
+  view.rerender(element('hidden'));
+  await until(
+    () =>
+      view.container.querySelector('.docx-tracked-change-card') == null &&
+      view.container.querySelector('.docx-unified-sidebar') == null
+  );
+  expect(
+    view.container.querySelectorAll(
+      '.docx-review-dot, .docx-review-summary, .docx-review-leader'
+    )
+  ).toHaveLength(0);
+  view.rerender(element('hidden', [comment, reply]));
+  await until(() => view.container.querySelectorAll('.docx-unified-sidebar .docx-comment-card').length === 2);
+  expect(view.container.querySelector('.docx-tracked-change-card')).toBeNull();
+  view.rerender(element('cards', [comment, reply]));
+  await until(() => view.container.querySelector('.docx-tracked-change-card') != null);
+  expect(view.container.querySelector('.docx-review-dot')).toBeNull();
+  expect(view.container.querySelectorAll('.docx-unified-sidebar .docx-comment-card')).toHaveLength(1);
+  expect(session.version()).toBe(version);
+}, 15_000);

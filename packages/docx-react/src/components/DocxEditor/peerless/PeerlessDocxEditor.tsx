@@ -100,6 +100,7 @@ const FONT_REFRESH_DELAY_MS = 200;
 const FONT_REFRESH_INTERVAL_MS = 1000;
 const EMPTY_COMMENTS: NonNullable<DocxEditorProps['comments']> = [];
 const EMPTY_CHANGES: TrackedChangeEntry[] = [];
+const EMPTY_REVIEW_ITEMS: ReviewSidebarItem[] = [];
 const EMPTY_PAGES: NonNullable<PeerlessFrameGeometry['pages']> = [];
 type ResidentResume = Parameters<NonNullable<UsePeerlessEditSessionOptions['recovery']>['reopen']>[0];
 
@@ -1277,8 +1278,16 @@ export const PeerlessDocxEditor = forwardRef<DocxEditorRef, DocxEditorProps>(fun
     [sourceKey, documentKey, shellState.view?.identity.incarnation, shellState.view?.identity.epoch]);
   const comments = props.comments ?? review?.uiComments ?? commentPlacement.comments ?? sourceComments.current;
   const dotsMode = props.trackedChanges?.display === 'dots';
-  const hasComments = comments.some(comment => comment.parentId == null);
-  const hasCards = (dotsMode ? hasComments : comments.length > 0) || (!dotsMode && !!trackedChanges?.entries.length);
+  const hiddenMode = props.trackedChanges?.display === 'hidden';
+  const hiddenComments = useMemo(() => {
+    if (!hiddenMode || !trackedChanges?.entries.length) return comments;
+    const revisionIds = new Set(trackedChanges.entries.map(entry => entry.revisionId));
+    if (!comments.some(comment => comment.parentId != null && revisionIds.has(comment.parentId))) return comments;
+    return comments.map(comment => comment.parentId != null && revisionIds.has(comment.parentId)
+      ? { ...comment, parentId: undefined } : comment);
+  }, [comments, hiddenMode, trackedChanges]);
+  const hasComments = hiddenComments.some(comment => comment.parentId == null);
+  const hasCards = (dotsMode || hiddenMode ? hasComments : comments.length > 0) || (!dotsMode && !hiddenMode && !!trackedChanges?.entries.length);
   const autoOpened = useRef<string | undefined>(undefined);
   useLayoutEffect(() => {
     if (!hasCards || documentKey === undefined || autoOpened.current === documentKey) return;
@@ -1286,9 +1295,9 @@ export const PeerlessDocxEditor = forwardRef<DocxEditorRef, DocxEditorProps>(fun
     setCommentsOpen(true);
   }, [hasCards, documentKey, setCommentsOpen]);
   const commentCallbacks = useMemo(() => ({ ...revisionCallbacks, ...workerComments.callbacks }), [revisionCallbacks, workerComments.callbacks]);
-  const visibleComments = useMemo(() => commentsOpen ? comments : dotsMode ? comments.filter(comment => comment.parentId != null) : EMPTY_COMMENTS,
-    [comments, commentsOpen, dotsMode]);
-  const commentItems = useCommentSidebarItems({ comments: visibleComments, trackedChanges: commentsOpen || dotsMode ? trackedChanges?.entries ?? EMPTY_CHANGES : EMPTY_CHANGES,
+  const visibleComments = useMemo(() => commentsOpen ? hiddenComments : dotsMode ? hiddenComments.filter(comment => comment.parentId != null) : EMPTY_COMMENTS,
+    [hiddenComments, commentsOpen, dotsMode]);
+  const commentItems = useCommentSidebarItems({ comments: visibleComments, trackedChanges: (commentsOpen || dotsMode) && !hiddenMode ? trackedChanges?.entries ?? EMPTY_CHANGES : EMPTY_CHANGES,
     callbacks: commentCallbacks, showResolved: commentsOpen, isAddingComment: commentsOpen && workerComments.adding, addCommentYPosition: workerComments.addCommentY });
   const commentGeometryCurrent = !!(documentReady && shellState.view && review && reviewPlacementMatches(shellState.view, review));
   const positionedComments = useMemo(() => commentItems.map(item => {
@@ -1314,14 +1323,14 @@ export const PeerlessDocxEditor = forwardRef<DocxEditorRef, DocxEditorProps>(fun
     (selected.focus.story === 'body' || selected.focus.story.startsWith('body:')) && selected.anchor.story === selected.focus.story &&
     (selected.anchor.paraId !== selected.focus.paraId || selected.anchor.offset !== selected.focus.offset) &&
     !!shellState.view && geometryMatchesDocument(shellState.view) ? selectionAnchor() : null;
-  const hostProposalsEnabled = documentReady && props.allowHostProposals === true && props.showHostProposalsInSidebar === true && (commentsOpen || dotsMode);
+  const hostProposalsEnabled = documentReady && !hiddenMode && props.allowHostProposals === true && props.showHostProposalsInSidebar === true && (commentsOpen || dotsMode);
   const hostProposalItems = useMemo(() => workerProposalSidebarItems(controller, currentReview, geometry, hostProposalsEnabled, reportRecoverableError),
     [controller, currentReview, geometry, hostProposalsEnabled, reportRecoverableError, shellState.view?.geometry, zoom, geometryRevision, hostProposalsEnabled ? displayWindow : null]);
   const allCommentItems = useMemo(() => [...positionedComments, ...hostProposalItems], [positionedComments, hostProposalItems]);
-  const reviewItems = useMemo(() => allCommentItems.filter(item => item.review).sort((first, second) => first.review!.change.from - second.review!.change.from), [allCommentItems]);
-  const sidebarItems = useMemo(() => mergeSidebarItems(allCommentItems.filter(item => !dotsMode || !item.review), props.pluginSidebarItems ?? [], managedItems),
-    [allCommentItems, dotsMode, props.pluginSidebarItems, managedItems]);
-  const sidebarOpen = (commentsOpen && (!dotsMode || hasComments || workerComments.adding)) || sidebarItems.some((item) => !item.hidden);
+  const reviewItems = useMemo(() => hiddenMode ? EMPTY_REVIEW_ITEMS : allCommentItems.filter(item => item.review).sort((first, second) => first.review!.change.from - second.review!.change.from), [allCommentItems, hiddenMode]);
+  const sidebarItems = useMemo(() => mergeSidebarItems(allCommentItems.filter(item => (!dotsMode && !hiddenMode) || !item.review), props.pluginSidebarItems ?? [], managedItems),
+    [allCommentItems, dotsMode, hiddenMode, props.pluginSidebarItems, managedItems]);
+  const sidebarOpen = (commentsOpen && ((!dotsMode && !hiddenMode) || hasComments || workerComments.adding)) || sidebarItems.some((item) => !item.hidden);
   const anchorPositions = useMemo(() => new Map(allCommentItems.flatMap(item =>
     !item.hidden && item.anchorKey && item.fixedY != null ? [[item.anchorKey, item.fixedY] as const] : [])), [allCommentItems]);
   const columnWidth = useMemo(() => sidebarItems.every(item => item.hidden || reviewItems.some(review => review.id === item.id)) ? REVIEW_CARD_WIDTH : SIDEBAR_WIDTH,

@@ -1,5 +1,5 @@
 import type { DocxTextRange } from './edits';
-import type { YrsCellLoc, YrsLoc } from './index';
+import type { YrsCellLoc, YrsLoc, YrsStoryRange } from './index';
 import { displayPositionToYrsLoc } from './inputPositionMap';
 import type { YrsPointerProjectionTarget } from './yrsPositionProjection';
 import { findWordBoundaries } from '../utils/textSelection';
@@ -35,6 +35,10 @@ export interface DocxDisplaySelectionInfo {
   paragraphText: string;
   before: string;
   after: string;
+  /** Engine version the read belongs to. */
+  version: string;
+  /** Raw forward-normalized range; null when the selection spans stories. */
+  range: YrsStoryRange | null;
 }
 
 interface ResolvedPosition {
@@ -223,18 +227,24 @@ export function resolveSelectionInfo(
     const selection = resolveSelectionText(index, rootStory, anchor, head, expectVersion);
     return selection ? {
       paraId: null, selectedText: selection.text, paragraphText: '', before: '', after: '',
+      version: reader.version(), range: null,
     } : null;
   }
   const [start, end] =
     storyOffsetForLoc(reader, a.loc) <= storyOffsetForLoc(reader, b.loc)
       ? [a.loc, b.loc]
       : [b.loc, a.loc];
+  const range: YrsStoryRange = {
+    story: start.story,
+    start: { paraId: start.paraId, offset: start.offset },
+    end: { paraId: end.paraId, offset: end.offset },
+  };
   try {
-    return reader.selectionText({
-      story: start.story,
-      start: { paraId: start.paraId, offset: start.offset },
-      end: { paraId: end.paraId, offset: end.offset },
-    });
+    return {
+      ...reader.selectionText({ story: range.story, start: range.start, end: range.end }),
+      version: reader.version(),
+      range,
+    };
   } catch {
     return null;
   }

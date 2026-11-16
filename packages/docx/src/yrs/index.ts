@@ -1049,6 +1049,12 @@ export interface YrsSelectionText {
   after: string;
 }
 
+/** Accepted-view texts plus the raw, forward-normalized range and engine version of one read. @internal */
+export interface YrsSelectionInfo extends YrsSelectionText {
+  version: string;
+  range: YrsStoryRange | null;
+}
+
 /**
  * One live replica of the yrs editing model. Thin typed wrapper over the
  * wasm `EditSession` — no editing logic on this side of the boundary.

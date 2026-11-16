@@ -38,7 +38,8 @@ export interface TrackedChangeCardRenderProps extends SidebarItemRenderProps {
 
 /** Review display and author customization. */
 export interface TrackedChangesOptions {
-  display?: 'cards' | 'dots';
+  /** `'hidden'` hides review cards, dots and the change summary; revisions stay in the document. Defaults to `'cards'`. */
+  display?: 'cards' | 'dots' | 'hidden';
   getAuthorAppearance?: (author: { name: string; kind: TrackedChangeAuthorKind }) => TrackedChangeAuthorAppearance | undefined;
   renderCard?: (props: TrackedChangeCardRenderProps) => ReactNode;
 }

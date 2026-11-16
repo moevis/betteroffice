@@ -1,5 +1,5 @@
 import { clipboardFragmentHasPictures, clipboardFragmentIsTextOnly } from '@betteroffice/docx/yrs';
-import type { DocxClipboardFragment, DocxClipboardSlice, DocxCommandSelection, YrsSelectionText } from '@betteroffice/docx/yrs';
+import type { DocxClipboardFragment, DocxClipboardSlice, DocxCommandSelection, YrsSelectionInfo } from '@betteroffice/docx/yrs';
 import type { PeerlessEditSessionBinding } from '../hooks/usePeerlessEditSession';
 import { clipboardFragmentHtml } from '../internals/clipboardHtml';
 import { flushAdmittedInput } from './inputAdmission';
@@ -7,7 +7,7 @@ import type { PeerlessViewIdentity } from './viewStore';
 
 interface SelectionRead {
   binding: PeerlessEditSessionBinding;
-  readSelection(selection: DocxCommandSelection): Promise<YrsSelectionText>;
+  readSelection(selection: DocxCommandSelection): Promise<YrsSelectionInfo>;
   isCurrent(): boolean;
 }
 

@@ -2297,7 +2297,13 @@ async function handle(request: ScheduledRequest): Promise<void> {
       case 'rawSelectionInfo': {
         const { anchor, focus } = request.read.selection;
         if (anchor.story !== focus.story) throw new Error('Cross-story selection is unavailable');
-        value = session.selectionText({ story: anchor.story, start: anchor, end: focus });
+        const range = currentSelectionRange(session, request.read.selection);
+        if (!range) throw new Error('The selection has no raw DOCX range');
+        value = {
+          ...session.selectionText({ story: range.story, start: range.start, end: range.end }),
+          version: engine.version(),
+          range,
+        };
         break;
       }
       case 'clipboardSlice': {

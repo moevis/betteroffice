@@ -132,7 +132,7 @@ function DotsHarness({ options = { display: 'dots' }, readOnly = false, pages = 
   const rects = new Map(items.map(item => [item.id, changeRects]));
   return <div ref={scroller}><div ref={host}><TrackedChangesReview items={items} options={options} pages={pages}
     rects={rects} zoom={1} pageWidth={600} sidebarOpen={false} hostRef={host} scrollerRef={scroller} activeId={active} setActive={setActive}
-    select={() => {}} readOnly={readOnly} acceptAll={() => {}}>{options.display !== 'dots' && items.map(item => <div key={item.id}>{item.render({ ...sidebarProps, isExpanded: item.id === active, onToggleExpand: () => setActive(item.id) })}</div>)}</TrackedChangesReview></div></div>;
+    select={() => {}} readOnly={readOnly} acceptAll={() => {}}>{options.display === 'cards' && items.map(item => <div key={item.id}>{item.render({ ...sidebarProps, isExpanded: item.id === active, onToggleExpand: () => setActive(item.id) })}</div>)}</TrackedChangesReview></div></div>;
 }
 
 test('dots open on hover and focus, survive the balloon grace period, close on Escape and navigate', async () => {
@@ -186,6 +186,22 @@ test('cards show the horizontal summary and an author-coloured leader for the ac
   expect(leader.style.getPropertyValue('--doc-review-author')).toBe(resolveReviewAuthor(change.author).color);
   expect(leader.querySelector('path')?.getAttribute('d')).toContain(' L');
   expect(view.container.querySelector('.docx-review-nav__count')?.textContent).toBe('1/2');
+});
+
+test('hidden display removes cards, dots, summary and leaders, then dots and cards restore the same items', async () => {
+  const view = render(<DotsHarness options={{ display: 'cards' }} />);
+  await waitFor(() => expect(view.container.querySelector('.docx-review-summary')?.getAttribute('data-orientation')).toBe('horizontal'));
+  fireEvent.click(view.container.querySelector('.docx-review-card')!);
+  await waitFor(() => expect(view.container.querySelector('svg.docx-review-leader')).not.toBeNull());
+  view.rerender(<DotsHarness options={{ display: 'hidden' }} />);
+  await waitFor(() => expect(view.container.querySelectorAll('.docx-review-card, .docx-review-dot, .docx-review-summary, .docx-review-leader')).toHaveLength(0));
+  view.rerender(<DotsHarness options={{ display: 'dots' }} />);
+  await waitFor(() => expect(view.container.querySelectorAll('.docx-review-dot')).toHaveLength(2));
+  expect(view.container.querySelector('.docx-review-summary')?.getAttribute('data-orientation')).toBe('vertical');
+  view.rerender(<DotsHarness options={{ display: 'cards' }} />);
+  await waitFor(() => expect(view.container.querySelectorAll('.docx-review-card')).toHaveLength(2));
+  expect(view.container.querySelector('.docx-review-dot')).toBeNull();
+  expect(view.container.querySelector('.docx-review-summary')?.getAttribute('data-orientation')).toBe('horizontal');
 });
 
 test('balloons flip inside the visible right edge and the summary follows viewport scrolling', async () => {

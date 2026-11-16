@@ -18,7 +18,8 @@ function fixture(slice: DocxClipboardSlice = { text: 'bcd', fragment }) {
   } as unknown as PeerlessEditSessionBinding;
   const publish = (next: Partial<typeof state>) => { state = { ...state, ...next }; for (const listener of listeners) listener(); };
   const readClipboardSlice = mock(async (_selection: DocxCommandSelection) => slice);
-  const readSelection = mock(async () => ({ paraId: 'a', selectedText: 'bcd', paragraphText: 'abcdef', before: 'a', after: 'ef' }));
+  const readSelection = mock(async () => ({ paraId: 'a', selectedText: 'bcd', paragraphText: 'abcdef', before: 'a', after: 'ef',
+    version: 'v', range: { story: 'body', start: range.anchor, end: range.focus } }));
   const prefetch = createClipboardPrefetch({ binding, isCurrent: () => true, readSelection, readClipboardSlice });
   const setPending = (value: unknown) => { tail = value; };
   return { binding, publish, readClipboardSlice, readSelection, prefetch, submit, setPending };

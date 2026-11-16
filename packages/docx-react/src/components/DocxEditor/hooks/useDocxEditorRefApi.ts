@@ -1208,7 +1208,7 @@ export function useDocxEditorRefApi({
         const range = session ? normalizeSelection(session) : null;
         if (!session || !range) return null;
         try {
-          return session.selectionText(range);
+          return { ...session.selectionText(range), version: session.version(), range };
         } catch {
           return null;
         }

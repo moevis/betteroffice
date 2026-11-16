@@ -53,7 +53,8 @@ afterEach(() => {
 });
 afterAll(async () => { if (ownsDom) await GlobalRegistrator.unregister(); });
 
-const INFO = { paraId: 'p', selectedText: 'hello', paragraphText: 'hello', before: '', after: '' };
+const INFO = { paraId: 'p', selectedText: 'hello', paragraphText: 'hello', before: '', after: '',
+  version: 'v', range: { story: 'body', start: { paraId: 'p', offset: 0 }, end: { paraId: 'p', offset: 5 } } };
 const PAGE_OPTIONS = { revisionView: 'markup' } as const;
 const PAGE_REQUEST = JSON.stringify({ renderEnv: {} });
 const PAGE_EXPORT = {

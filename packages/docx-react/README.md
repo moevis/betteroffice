@@ -44,6 +44,7 @@ All props below are optional. Omit the document source to show the placeholder.
 | `onDocumentChange` | `(change: DocxDocumentChange) => void` | Receive the document version after a committed change. |
 | `onError` | `(error: Error, info?: DocxErrorInfo) => void` | Receive errors; recoverable reports include `recoverable: true`. |
 | `collaboration` | `DocxEditorCollaborationOptions` | Configure the shared replica. |
+| `trackedChanges` | `TrackedChangesOptions` | Review cards by default; `display: 'dots'` shows margin dots, `'hidden'` hides review hints without changing revisions. |
 | `showToolbar` | `boolean` | Show built-in or supplied chrome; defaults to `true`. |
 | `toolbar` | `ReactNode` | Replace the toolbar; `null` hides it. The composition API can change in minor releases. |
 | `showRuler` | `boolean` | Show the ruler; defaults to `false`. |
@@ -169,6 +170,17 @@ layout requirements, and geometry.
 
 The ref's `listContentControls` and `findContentControls` inspect controls before version-checked
 fills; see [content controls](https://docs.betteroffice.dev/docs/javascript#fill-docx-content-controls).
+
+## Tracked-change review visibility
+
+Use `trackedChanges={{ display: 'hidden' }}` to hide revision cards, margin dots, leader lines,
+the change-count summary, and sidebar space used only by revisions. Omit `display` or set it
+to `'cards'` to restore cards; `'dots'` selects margin dots. The prop can change without remounting
+the editor, in both the default worker editor and the deprecated in-thread editor.
+
+This is presentation-only: revisions and inline insertion/deletion marks remain in the document;
+it does not accept/reject changes, alter RAW selection coordinates, or weaken edit protection.
+Comments remain available, including comments normally threaded under a revision card.
 
 ## Collaboration
 

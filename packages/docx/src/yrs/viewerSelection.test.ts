@@ -255,7 +255,11 @@ describe('viewer selection reads', () => {
     for (const range of ranges) {
       const anchor = at(range.start.paraId, range.start.offset);
       const head = at(range.end.paraId, range.end.offset);
-      const expected = main.selectionText({ story: 'body', ...range });
+      const expected = {
+        ...main.selectionText({ story: 'body', ...range }),
+        version,
+        range: { story: 'body', ...range },
+      };
       expect(resolveSelectionInfo(index, 'body', anchor, head, version)).toEqual(expected);
       expect(resolveSelectionInfo(index, 'body', head, anchor, version)).toEqual(expected);
       expect(resolveSelectionInfo(index, 'body', anchor, head, `${version}-stale`)).toBeNull();
@@ -267,7 +271,7 @@ describe('viewer selection reads', () => {
     const anchor = at('00000003', 1);
     const head = at('00000004', 1);
     expect(resolveSelectionText(index, 'body', anchor, head, version)?.text).toBe('A1\tB1');
-    const expected = { paraId: null, selectedText: 'A1\tB1', paragraphText: '', before: '', after: '' };
+    const expected = { paraId: null, selectedText: 'A1\tB1', paragraphText: '', before: '', after: '', version, range: null };
     expect(resolveSelectionInfo(index, 'body', anchor, head, version)).toEqual(expected);
     expect(resolveSelectionInfo(index, 'body', head, anchor, version)).toEqual(expected);
     expect(resolveSelectionInfo(index, 'body', anchor, head, `${version}-stale`)).toBeNull();
@@ -279,7 +283,7 @@ describe('viewer selection reads', () => {
     const head = at('00000003', 1);
     expect(resolveSelectionInfo(index, 'body', anchor, head, version)).toEqual({
       paraId: null, selectedText: resolveSelectionText(index, 'body', anchor, head, version)!.text,
-      paragraphText: '', before: '', after: '',
+      paragraphText: '', before: '', after: '', version, range: null,
     });
     expect(resolveSelectionInfo(index, 'missing', 0, 1, version)).toBeNull();
     expect(resolveSelectionInfo(index, 'body', -1, at('00000001', 1), version)).toBeNull();

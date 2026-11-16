@@ -8,7 +8,8 @@ function fixture(readOnly = false) {
   const state = { workerSelection: selection, editState: { readOnly }, version: 1 };
   const submit = mock((_intent: unknown) => ({ status: 'submitted', ticket: { ack: Promise.resolve({ status: 'applied' }) } }));
   const binding = { viewStore: { getSnapshot: () => state }, commands: { submit }, session: { flush: async () => {} } } as unknown as PeerlessEditSessionBinding;
-  const readSelection = mock(async () => ({ paraId: 'a', selectedText: 'bcd', paragraphText: 'abcdef', before: 'a', after: 'ef' }));
+  const readSelection = mock(async () => ({ paraId: 'a', selectedText: 'bcd', paragraphText: 'abcdef', before: 'a', after: 'ef',
+    version: 'v', range: { story: 'body', start: selection.anchor, end: selection.focus } }));
   return { binding, submit, readSelection, state, selection };
 }
 
@@ -90,7 +91,8 @@ test('copy and cut project raw selection offsets across tracked deletions in the
       };
       const write = mock(async (_text: string) => {});
       const options = { binding, cut, write, isCurrent: () => true,
-        readSelection: async () => session.selectionText({ story: 'body', start: selected.anchor, end: selected.focus }) };
+        readSelection: async () => ({ ...session.selectionText({ story: 'body', start: selected.anchor, end: selected.focus }),
+          version: session.version(), range: { story: 'body', start: selected.anchor, end: selected.focus } }) };
       expect(await copyWorkerSelection(options)).toBe(true);
       expect(write).toHaveBeenCalledWith('a');
       const read = session.readParagraphs({ view: 'accepted' });

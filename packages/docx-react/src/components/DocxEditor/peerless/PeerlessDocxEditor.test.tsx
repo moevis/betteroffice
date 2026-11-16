@@ -826,6 +826,55 @@ test('dots review keeps revisions out of the sidebar, preserves comment space an
   h.controller.dispose();
 });
 
+test('hidden review removes revision cards, dots and sidebar space but keeps comments, then restores dots and cards', async () => {
+  const h = proposalHost({ automatic: false });
+  h.binding.viewStore.getSnapshot().geometry!.pages = [{ page: { pageId: '0', pageIndex: 0 },
+    bounds: { x: 0, y: 0, width: 600, height: 800 }, transform: [1, 0, 0, 1, 0, 0] as const }];
+  const base = await h.readAt({ kind: 'reviewSnapshot', expectPreviewVersion: 0 }, h.snapshot().version) as { value: yrs.DocxReviewSnapshot };
+  const review = { ...base.value, revisions: [7, 8].map(id => ({ revisionId: String(id), kind: 'insertion', story: 'body', author: 'Editor', date: '2026-10-01T09:00:00Z', preview: `Change ${id}`,
+    range: { story: 'body', start: { paraId: 'p0', offset: id }, end: { paraId: 'p0', offset: id + 1 } } })),
+    revisionGeometry: { 7: [{ pageIndex: 0, x: 30, y: 40, width: 50, height: 12 }], 8: [{ pageIndex: 0, x: 90, y: 60, width: 20, height: 12 }] } };
+  const sidebar = { comments: [], revisions: [7, 8].map(id => ({ key: `revision-${id}`, start: { story: 'body', position: id } })), trackedChanges: {
+    entries: [7, 8].map(id => ({ revisionId: id, type: 'insertion', text: `Change ${id}`, author: 'Editor', from: id, to: id + 1 })), commentToRevision: [] } };
+  const readAt = spyOn(yrs.ResidentEngineWorkerClient.prototype, 'documentReadAt').mockImplementation((async (request: { kind: string }, version: string) =>
+    ({ status: 'ok', version, value: request.kind === 'sidebar' ? sidebar : request.kind === 'reviewSnapshot' ? review
+      : request.kind === 'toolbarMetadata' ? { styles: [], fontFamilies: [] } : null })) as never);
+  restorers.push(() => readAt.mockRestore());
+  const onSidebar = mock((_open: boolean) => {});
+  const comment = { id: 1, author: 'Reader', content: [] };
+  const reply = { id: 2, author: 'Reviewer', content: [], parentId: 7 };
+  const element = (display: 'cards' | 'dots' | 'hidden', withComment = false) => <DocxEditor {...peerlessProps} showToolbar={false}
+    trackedChanges={{ display }} onCommentsSidebarOpenChange={onSidebar} comments={withComment ? [comment, reply] : []} />;
+  const view = render(element('hidden'));
+  await waitFor(() => expect(view.getByTestId('docx-worker-paged-editor').dataset.opened).toBe('true'));
+  await act(async () => { surface.mock.calls[0]![0].onReady!(h.binding); });
+  await waitFor(() => expect(view.container.querySelector('.docx-unified-sidebar')).toBeNull());
+  expect(view.container.querySelectorAll('.docx-tracked-change-card, .docx-review-dot, .docx-review-summary, .docx-review-leader')).toHaveLength(0);
+  expect(view.getByTestId('docx-worker-paged-editor').parentElement!.style.paddingRight).toBe('0px');
+  expect(onSidebar).not.toHaveBeenCalledWith(true);
+  view.rerender(element('cards'));
+  await waitFor(() => expect(view.container.querySelectorAll('.docx-tracked-change-card')).toHaveLength(2));
+  expect(view.container.querySelector('.docx-unified-sidebar')).not.toBeNull();
+  view.rerender(element('hidden'));
+  await waitFor(() => expect(view.container.querySelector('.docx-unified-sidebar')).toBeNull());
+  expect(view.container.querySelectorAll('.docx-tracked-change-card, .docx-review-dot, .docx-review-summary, .docx-review-leader')).toHaveLength(0);
+  expect(view.getByTestId('docx-worker-paged-editor').parentElement!.style.paddingRight).toBe('0px');
+  view.rerender(element('hidden', true));
+  await waitFor(() => expect(view.container.querySelectorAll('.docx-unified-sidebar .docx-comment-card')).toHaveLength(2));
+  expect(view.container.querySelectorAll('.docx-tracked-change-card, .docx-review-dot, .docx-review-summary, .docx-review-leader')).toHaveLength(0);
+  view.rerender(element('dots', true));
+  await waitFor(() => expect(view.container.querySelectorAll('.docx-review-dot')).toHaveLength(2));
+  expect(view.container.querySelectorAll('.docx-unified-sidebar .docx-comment-card')).toHaveLength(1);
+  expect(view.container.querySelectorAll('.docx-tracked-change-card')).toHaveLength(0);
+  view.rerender(element('cards', true));
+  await waitFor(() => expect(view.container.querySelectorAll('.docx-tracked-change-card')).toHaveLength(2));
+  expect(view.container.querySelectorAll('.docx-review-dot')).toHaveLength(0);
+  expect(view.container.querySelectorAll('.docx-unified-sidebar .docx-comment-card')).toHaveLength(1);
+  expect(h.submit.mock.calls.filter(call => call[0] === 'acceptRevision' || call[0] === 'rejectRevision')).toHaveLength(0);
+  view.unmount();
+  h.controller.dispose();
+});
+
 test('dots review includes proposals as agent dots and accepts them through proposal decisions', async () => {
   const h = proposalHost();
   await h.submit('propose', { proposals: inputs }, {}).ack;

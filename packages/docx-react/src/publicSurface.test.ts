@@ -116,7 +116,7 @@ test('errors and new public types are exported from the root', () => {
   const names = ['DocxParagraphList', 'DocxCommandAdmissionError', 'DocxCommandAdmissionCode', 'DocxWorkerError', 'DocxWorkerEditorChunkLoadError', 'DocxSyncApiError', 'DocxEditorNotReadyError', 'DocxAsyncOnlyError', 'DocxReplicaNotReadyError', 'DocxParagraphMatch', 'DocxSelectionInfo', 'DocxCommentInsertion', 'DocxDocumentChange', 'DocxEditorBaseProps', 'DocxAsyncEditorProps', 'DocxLegacyEditorProps', 'DocxInThreadEditorProps'];
   for (const name of names) expect(index).toMatch(new RegExp(`\\b${name}\\b`));
   const match: DocxParagraphMatch = { paraId: 'p', match: 'text', before: '', after: '' };
-  const selection: DocxSelectionInfo = { paraId: null, selectedText: '', paragraphText: '', before: '', after: '' };
+  const selection: DocxSelectionInfo = { paraId: null, selectedText: '', paragraphText: '', before: '', after: '', version: 'v', range: null };
   const insertion: DocxCommentInsertion = { paraId: 'p', text: 'text', author: 'Author' };
   const change: DocxDocumentChange = { version: 'v' };
   expect([match.paraId, selection.paraId, insertion.paraId, change.version]).toEqual(['p', null, 'p', 'v']);

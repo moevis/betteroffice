@@ -205,12 +205,29 @@ export interface DocxEditorSaveInfo {
   structureDropped?: unknown[];
 }
 
+/** One raw engine position; `offset` counts UTF-16 units in the paragraph's raw text. */
+export interface DocxSelectionPoint {
+  paraId: string;
+  offset: number;
+}
+
+/** A raw engine range `[start, end)`, start at or before end in document order. */
+export interface DocxSelectionRange {
+  story: string;
+  start: DocxSelectionPoint;
+  end: DocxSelectionPoint;
+}
+
 export interface DocxSelectionInfo {
   paraId: string | null;
   selectedText: string;
   paragraphText: string;
   before: string;
   after: string;
+  /** Engine version the text and range were read at. */
+  version: string;
+  /** Raw range; null only when the selection spans stories. */
+  range: DocxSelectionRange | null;
 }
 
 export interface DocxCommentInsertion {
@@ -775,7 +792,7 @@ export interface DocxEditorRef {
    * and clearing (null). Returns unsubscribe.
    */
   onSearchChange: (listener: (state: DocxSearchState | null) => void) => () => void;
-  /** Reads the current caret or selection, returning null when there is no selection. */
+  /** Reads the caret or selection with its raw engine range and version; null when there is no selection. */
   readSelectionInfo: () => Promise<DocxSelectionInfo | null>;
   /** Finds paragraphs containing one unique occurrence of the query. */
   findParagraphs: (query: string, options?: { caseSensitive?: boolean; limit?: number }) => Promise<DocxParagraphMatch[]>;
@@ -1606,6 +1623,7 @@ const LegacyDocxEditor = forwardRef<DocxEditorRef, DocxEditorBaseProps>(function
   );
 
   // Auto-open the sidebar once if the loaded document already has tracked changes.
+  const reviewHidden = trackedChangesOptions?.display === 'hidden';
   useCommentLifecycle({
     commentToRevision,
     setComments,
@@ -1614,6 +1632,7 @@ const LegacyDocxEditor = forwardRef<DocxEditorRef, DocxEditorBaseProps>(function
     getProposalAnchorKeys,
     setShowCommentsSidebar,
     trackedChangesLoadedRef,
+    hideTrackedChanges: reviewHidden,
   });
 
   useFontLifecycle(fonts, onFontsLoadedCallback, onError, fontScope);
@@ -2394,8 +2413,20 @@ const LegacyDocxEditor = forwardRef<DocxEditorRef, DocxEditorBaseProps>(function
   );
 
   const reviewPeers = useReviewPeers(collaboration?.presence);
+  const sidebarComments = useMemo(() => {
+    if (!reviewHidden) return comments;
+    const revisionIds = new Set(trackedChanges.map((change) => change.revisionId));
+    if (!comments.some((comment) => comment.parentId != null && revisionIds.has(comment.parentId))) {
+      return comments;
+    }
+    return comments.map((comment) =>
+      comment.parentId != null && revisionIds.has(comment.parentId)
+        ? { ...comment, parentId: undefined }
+        : comment
+    );
+  }, [comments, reviewHidden, trackedChanges]);
   const commentSidebarItems = useCommentSidebarItems({
-    comments,
+    comments: sidebarComments,
     trackedChanges: sidebarTrackedChanges,
     callbacks: stableCallbacks,
     showResolved: showCommentsSidebar,
@@ -2412,7 +2443,7 @@ const LegacyDocxEditor = forwardRef<DocxEditorRef, DocxEditorBaseProps>(function
     setExpandedSidebarItem(next.id);
   };
   const reviewDots = trackedChangesOptions?.display === 'dots';
-  const reviewItems = showCommentsSidebar || reviewDots ? reviewSidebarItems : [];
+  const reviewItems = !reviewHidden && (showCommentsSidebar || reviewDots) ? reviewSidebarItems : [];
   const reviewGeometry = useCanvasReviewGeometry(canvasRenderer.queries ?? null, canvasRenderer.canvasHostRef, editorContentRef,
     reviewItems, state.zoom, canvasRenderer.frame?.frameEpoch);
   const reviewHostRef = useRef<HTMLDivElement>(null);
@@ -2420,11 +2451,11 @@ const LegacyDocxEditor = forwardRef<DocxEditorRef, DocxEditorBaseProps>(function
   const allSidebarItems = useMemo(
     () =>
       mergeSidebarItems(
-        showCommentsSidebar ? commentSidebarItems.filter((item) => !reviewDots || !item.review) : [],
+        showCommentsSidebar ? commentSidebarItems.filter((item) => (!reviewDots && !reviewHidden) || !item.review) : [],
         pluginSidebarItems ?? [],
         pluginHost.sidebarItems
       ),
-    [showCommentsSidebar, commentSidebarItems, reviewDots, pluginSidebarItems, pluginHost.sidebarItems]
+    [showCommentsSidebar, commentSidebarItems, reviewDots, reviewHidden, pluginSidebarItems, pluginHost.sidebarItems]
   );
 
   useEffect(() => {
@@ -2532,7 +2563,7 @@ const LegacyDocxEditor = forwardRef<DocxEditorRef, DocxEditorBaseProps>(function
         // Ignore comments whose anchor disappeared between selection events.
       }
     }
-    if (!cursorSidebarItem) {
+    if (!reviewHidden && !cursorSidebarItem) {
       for (const revision of session.listRevisions()) {
         if (revision.range.story !== head.story) continue;
         const revId = String(yrsIdToNumericId(revision.revisionId));
@@ -2570,6 +2601,7 @@ const LegacyDocxEditor = forwardRef<DocxEditorRef, DocxEditorBaseProps>(function
     revisionIdAliases,
     setShowCommentsSidebar,
     pluginHost.publishSelection,
+    reviewHidden,
   ]);
 
   const handleYrsToolbarSelectionChange = useCallback(
@@ -2585,15 +2617,17 @@ const LegacyDocxEditor = forwardRef<DocxEditorRef, DocxEditorBaseProps>(function
   // cursor-driven open above doesn't fire. Latches via a ref so a later
   // manual close stays closed.
   useEffect(() => {
-    if (sidebarAutoOpenedRef.current || commentSidebarItems.length === 0) return;
+    if (sidebarAutoOpenedRef.current) return;
+    const autoOpenItems = reviewHidden ? commentSidebarItems.filter((item) => !item.review) : commentSidebarItems;
+    if (autoOpenItems.length === 0) return;
     const proposed = getProposalAnchorKeys();
-    if (commentSidebarItems.every((item) => proposed.has(item.anchorKey ?? ''))) return;
+    if (autoOpenItems.every((item) => proposed.has(item.anchorKey ?? ''))) return;
     sidebarAutoOpenedRef.current = true;
     setShowCommentsSidebar(true);
-  }, [commentSidebarItems, getProposalAnchorKeys, setShowCommentsSidebar]);
+  }, [commentSidebarItems, getProposalAnchorKeys, setShowCommentsSidebar, reviewHidden]);
   // A document whose worker found tracked changes asks for the sidebar, as a loaded one does; a
   // host that keeps the sidebar closed keeps the replica unloaded.
-  workerRevisionsRef.current = () => setShowCommentsSidebar(true);
+  workerRevisionsRef.current = () => { if (!reviewHidden) setShowCommentsSidebar(true); };
 
   const editorContainerStyle: CSSProperties = {
     flex: 1,

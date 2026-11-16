@@ -5795,9 +5795,13 @@ describe('worker proposals during sliced completion', () => {
         },
         {
           read: { kind: 'selectionInfo', story: 'body', anchor: position(17), head: position(7), expectVersion: version },
-          value: main.selectionText({
-            story: 'body', start: { paraId: '00000100', offset: 7 }, end: { paraId: '00000100', offset: 17 },
-          }),
+          value: {
+            ...main.selectionText({
+              story: 'body', start: { paraId: '00000100', offset: 7 }, end: { paraId: '00000100', offset: 17 },
+            }),
+            version,
+            range: { story: 'body', start: { paraId: '00000100', offset: 7 }, end: { paraId: '00000100', offset: 17 } },
+          },
         },
         {
           read: { kind: 'commentTarget', story: 'body', commentId: '1', expectVersion: version },
@@ -5831,6 +5835,29 @@ describe('worker proposals during sliced completion', () => {
       }
     } finally {
       main.destroy();
+      engine.destroy();
+    }
+  });
+
+  test('raw selection reads carry a forward-normalized raw range at the read version', async () => {
+    const { w, engine } = await proposalWorker();
+    try {
+      const version = engine.proposalEngine.version();
+      const start = { story: 'body', paraId: '00000001', offset: 3 };
+      const end = { story: 'body', paraId: '00000002', offset: 9 };
+      const reply = await w.send({
+        type: 'documentRead',
+        read: { kind: 'rawSelectionInfo', selection: { anchor: end, focus: start } },
+      });
+      expect(reply.ok && reply.read).toEqual({
+        version,
+        value: {
+          ...engine.selectionText({ story: 'body', start, end }),
+          version,
+          range: { story: 'body', start: { paraId: start.paraId, offset: start.offset }, end: { paraId: end.paraId, offset: end.offset } },
+        },
+      });
+    } finally {
       engine.destroy();
     }
   });

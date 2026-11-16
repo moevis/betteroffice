@@ -25,6 +25,7 @@ export function useCommentLifecycle({
   getProposalAnchorKeys,
   setShowCommentsSidebar,
   trackedChangesLoadedRef,
+  hideTrackedChanges = false,
 }: {
   commentToRevision: Map<number, number>;
   setComments: React.Dispatch<React.SetStateAction<Comment[]>>;
@@ -33,6 +34,8 @@ export function useCommentLifecycle({
   getProposalAnchorKeys: () => Set<string>;
   setShowCommentsSidebar: React.Dispatch<React.SetStateAction<boolean>>;
   trackedChangesLoadedRef: React.RefObject<boolean>;
+  /** Keep revisions from opening the sidebar, without latching the once-per-document guard. */
+  hideTrackedChanges?: boolean;
 }) {
   // Thread top-level comments under their overlapping tracked change.
   useEffect(() => {
@@ -55,6 +58,7 @@ export function useCommentLifecycle({
   // Auto-open the sidebar once if the loaded document already has
   // tracked changes. Resets on every fresh load via the parent-owned ref.
   useEffect(() => {
+    if (hideTrackedChanges) return;
     if (trackedChangesLoadedRef.current) return;
     if (isLoading) return;
     trackedChangesLoadedRef.current = true;
@@ -69,5 +73,6 @@ export function useCommentLifecycle({
     getProposalAnchorKeys,
     setShowCommentsSidebar,
     trackedChangesLoadedRef,
+    hideTrackedChanges,
   ]);
 }

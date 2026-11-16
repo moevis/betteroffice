@@ -48,6 +48,7 @@ export function TrackedChangesReview({ children, items, options, collaboration, 
 }) {
   const { t } = useTranslation();
   const dotsMode = options?.display === 'dots';
+  const hiddenMode = options?.display === 'hidden';
   const peers = useReviewPeers(collaboration?.presence);
   const authors = useMemo(() => items.map(item => resolveReviewAuthor(item.review!.change.author || t('trackedChanges.unknown'), item.review!.kind,
     options, peers, collaboration?.user, collaboration?.clientId)), [items, options, peers, collaboration?.user, collaboration?.clientId, t]);
@@ -239,7 +240,7 @@ export function TrackedChangesReview({ children, items, options, collaboration, 
   });
   return <TrackedChangesContext.Provider value={context}>
     {children}
-    <div className="docx-review-layer" onMouseDown={event => event.stopPropagation()}>
+    {!hiddenMode && <div className="docx-review-layer" onMouseDown={event => event.stopPropagation()}>
       {leaders.map(({ id, path }) => <svg key={id} className="docx-review-leader" data-review-item={id} aria-hidden="true"
         style={reviewAuthorStyle(authors[items.findIndex(item => item.id === id)]!)}><path className="docx-review-leader__path" d={path} /></svg>)}
       {items.length > 0 && !readOnly && layout.ready && <div className="docx-review-summary-position" ref={positionSummary}>
@@ -268,6 +269,6 @@ export function TrackedChangesReview({ children, items, options, collaboration, 
         onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget as Node)) { focused.current = null; closeSoon(); } }}>
         <Fragment key={active.id}>{active.render({ isExpanded: true, onToggleExpand: () => setActive(active.id), measureRef: noopMeasure })}</Fragment>
       </div>}
-    </div>
+    </div>}
   </TrackedChangesContext.Provider>;
 }

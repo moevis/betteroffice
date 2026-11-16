@@ -30,6 +30,8 @@ export {
   type DocxEditorRef,
   type DocxParagraphMatch,
   type DocxSelectionInfo,
+  type DocxSelectionPoint,
+  type DocxSelectionRange,
   type DocxCommentInsertion,
   type DocxDocumentChange,
   type DocxEditorCollaborationOptions,
