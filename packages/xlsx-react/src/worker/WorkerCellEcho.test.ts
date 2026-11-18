@@ -235,7 +235,7 @@ describe('WorkerCellEcho', () => {
     const gridline: DrawCmd = { op: 'line', x1: 96, y1: 0, x2: 96, y2: 24, width: 1, color: '#d0d0d0' };
     expect(install(0, 'initial', 0, {}, [gridline])).toBe(true);
     strokes.length = 0;
-    paintDisplayList(context, last.displayList!, request.dpr * request.zoom, { x: 0, y: 0 }, request.zoom);
+    paintDisplayList(context, last.displayList!, request.dpr * request.zoom, { x: 0, y: 0 }, { zoom: request.zoom });
     const authoritative = [...strokes];
     expect(authoritative).toHaveLength(1);
     strokes.length = 0;

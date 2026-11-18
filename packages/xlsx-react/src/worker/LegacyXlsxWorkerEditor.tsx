@@ -25,6 +25,7 @@ import { flushSync } from 'react-dom';
 import { useContextMenu } from '../../../../shared/react-toolbar/ContextMenu';
 import type { OverflowMenuEntry } from '../../../../shared/react-toolbar/MenuList';
 import { createXlsxCommandController, XlsxCommandAdmissionError } from '../commands/createXlsxCommandStore';
+import { commandReason, type XlsxCommandEnvironment } from '../commands/evaluate';
 import { engineStructuralRefusal, REFUSAL_CAUSE_KEYS } from '../commands/refusalCause';
 
 import type { InputDraft, InputSeal } from '../commands/inputCoordinator';
@@ -139,10 +140,18 @@ function revealAxis(position: number, size: number, frozen: boolean, scroll: num
   return position < scroll || size >= body ? position : Math.max(0, position + size - body);
 }
 
+/** The notice for a refused input: the localized reason for a sheet protection refusal, else its own text. */
+function refusalText(error: unknown, env: Pick<XlsxCommandEnvironment, 'translate'>): string {
+  if (error instanceof XlsxCommandAdmissionError && error.code === 'sheet-protected') {
+    return commandReason('sheet-protected', env).message;
+  }
+  return error instanceof Error ? error.message : String(error);
+}
+
 export function LegacyXlsxWorkerEditor(props: EditableSessionWorkbookProps) {
   const { t, lang } = useTranslation();
-  const tRef = useRef(t);
-  tRef.current = t;
+  const translate = useRef(t);
+  translate.current = t;
   const rootRef = useRef<HTMLDivElement>(null);
   usePluginGestures(rootRef);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -204,14 +213,9 @@ export function LegacyXlsxWorkerEditor(props: EditableSessionWorkbookProps) {
   const settledDraftRevision = useRef(0);
   const focus = useCallback(() => scrollRef.current?.focus({ preventScroll: true }), []);
   const reportInputError = useCallback((error: unknown) => {
-    const clipboard = clipboardRefusalMessage(error, tRef.current);
+    const clipboard = clipboardRefusalMessage(error, translate.current);
     if (clipboard) { setRefusal(clipboard); return; }
-    const local = inputRefusal(error);
-    if (local || error instanceof XlsxCommandAdmissionError) {
-      setRefusal((local ?? error as Error).message);
-      return;
-    }
-    setRefusal(error instanceof Error ? error.message : String(error));
+    setRefusal(refusalText(inputRefusal(error) ?? error, { translate: translate.current }));
   }, []);
   const acceptInput = () => Boolean(runRef.current?.current && !runRef.current.retiring && !runRef.current.failure && !propsRef.current.readOnly);
 
@@ -241,7 +245,7 @@ export function LegacyXlsxWorkerEditor(props: EditableSessionWorkbookProps) {
     () => {
       if (canvasRef.current) canvasRef.current.dataset.defaultFonts = 'settled';
       repaintHeldPreview();
-    });
+    }, props.remoteFonts);
   const paintPreview = (canvas: HTMLCanvasElement, displayList: DisplayList, request: WorkerPaintRequest) => {
     const context = canvas.getContext('2d');
     if (!context) throw new Error('Preview canvas context is unavailable');
@@ -249,7 +253,7 @@ export function LegacyXlsxWorkerEditor(props: EditableSessionWorkbookProps) {
     canvas.height = Math.round(request.height * request.dpr);
     canvas.style.width = `${request.width}px`;
     canvas.style.height = `${request.height}px`;
-    const settled = paintWithDefaultFonts(displayList, () => paintDisplayList(context, displayList, request.dpr * request.zoom, { x: 0, y: 0 }, request.zoom));
+    const settled = paintWithDefaultFonts(displayList, () => paintDisplayList(context, displayList, request.dpr * request.zoom, { x: 0, y: 0 }, { zoom: request.zoom }));
     heldPreview.current = settled ? null : { canvas, displayList, request };
     canvas.dataset.previewReady = settled ? 'true' : 'pending';
   };
@@ -315,7 +319,7 @@ export function LegacyXlsxWorkerEditor(props: EditableSessionWorkbookProps) {
       onError: (error) => owner?.fail(error),
       onRefusal(error, draft) {
         if (owner?.retiring) { owner.reportRefusal(error); return; }
-        const message = error instanceof Error ? error.message : String(error);
+        const message = refusalText(error, { translate: translate.current });
         if (owner?.recovering) flushSync(() => setRefusal(message));
         else setRefusal(message);
         inputHooks.current?.sync?.();
@@ -788,7 +792,7 @@ export function LegacyXlsxWorkerEditor(props: EditableSessionWorkbookProps) {
         canvas.style.width = `${request.width}px`;
         canvas.style.height = `${request.height}px`;
         canvas.dataset.defaultFonts = paintWithDefaultFonts(painted.displayList,
-          () => paintDisplayList(context, painted.displayList, request.dpr * request.zoom, { x: 0, y: 0 }, request.zoom)) ? 'settled' : 'pending';
+          () => paintDisplayList(context, painted.displayList, request.dpr * request.zoom, { x: 0, y: 0 }, { zoom: request.zoom })) ? 'settled' : 'pending';
         canvas.dataset.workerSequence = String(painted.sequence);
         canvas.dataset.paintSource = painted.source;
         canvas.dataset.workerZoom = String(request.zoom);

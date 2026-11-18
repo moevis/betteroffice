@@ -10,6 +10,7 @@
 import type {
   DisplayList,
   DrawCmd,
+  ImageCmd,
   LineCmd,
   PathCmd,
   PatternFillCmd,
@@ -44,6 +45,21 @@ const LINE_DASH: Record<Exclude<NonNullable<LineCmd['style']>, 'double'>, number
 
 const patternCache = new WeakMap<CanvasRenderingContext2D, Map<string, CanvasPattern>>();
 
+export type PictureSource = ImageBitmap | HTMLImageElement | HTMLCanvasElement | OffscreenCanvas;
+
+export interface PaintOptions {
+  /**
+   * The decoded image for an `image` command's `assetId`. Without one, or when
+   * it returns nothing, the picture is skipped.
+   */
+  resolveImage?: (assetId: string) => PictureSource | null | undefined;
+  /**
+   * The zoom the list was laid out at, so hairlines snap to the same CSS pixel
+   * columns the DOM header band uses. Defaults to 1.
+   */
+  zoom?: number;
+}
+
 /**
  * Paint a display list into a 2D context. `dpr` maps device-independent list
  * coordinates onto the backing store, so callers size the canvas at
@@ -54,7 +70,7 @@ export function paintDisplayList(
   dl: DisplayList,
   dpr: number,
   origin: { x: number; y: number } = { x: 0, y: 0 },
-  zoom = 1
+  options: PaintOptions = {}
 ): void {
   ctx.save();
   ctx.setTransform(dpr, 0, 0, dpr, origin.x, origin.y);
@@ -62,12 +78,21 @@ export function paintDisplayList(
   ctx.rect(0, 0, dl.width, dl.height);
   ctx.clip();
   ctx.clearRect(0, 0, dl.width, dl.height);
-  for (const cmd of dl.commands) paintCommand(ctx, cmd, dpr, origin, zoom);
+  for (const cmd of dl.commands) paintCommand(ctx, cmd, dpr, origin, options);
   ctx.restore();
 }
 
-function paintCommand(ctx: CanvasRenderingContext2D, cmd: DrawCmd, dpr: number, origin: { x: number; y: number }, zoom: number): void {
+function paintCommand(
+  ctx: CanvasRenderingContext2D,
+  cmd: DrawCmd,
+  dpr: number,
+  origin: { x: number; y: number },
+  options: PaintOptions
+): void {
   switch (cmd.op) {
+    case 'image':
+      paintClipped(ctx, cmd.clip, () => paintImage(ctx, cmd, options));
+      return;
     case 'fillRect':
       paintClipped(ctx, cmd.clip, () => {
         ctx.fillStyle = cmd.color;
@@ -78,7 +103,7 @@ function paintCommand(ctx: CanvasRenderingContext2D, cmd: DrawCmd, dpr: number, 
       paintClipped(ctx, cmd.clip, () => paintPattern(ctx, cmd, dpr, origin));
       return;
     case 'line':
-      paintClipped(ctx, cmd.clip, () => paintLine(ctx, cmd, dpr, origin, zoom));
+      paintClipped(ctx, cmd.clip, () => paintLine(ctx, cmd, dpr, origin, options.zoom ?? 1));
       return;
     case 'path':
       paintClipped(ctx, cmd.clip, () => paintPath(ctx, cmd));
@@ -133,6 +158,17 @@ function paintPattern(ctx: CanvasRenderingContext2D, cmd: PatternFillCmd, dpr: n
   ctx.fillRect(x, y, (Math.round((cmd.x + cmd.w) * dpr + origin.x) - origin.x) / dpr - x,
     (Math.round((cmd.y + cmd.h) * dpr + origin.y) - origin.y) / dpr - y);
   ctx.restore();
+}
+
+function paintImage(ctx: CanvasRenderingContext2D, cmd: ImageCmd, options: PaintOptions): void {
+  const image = options.resolveImage?.(cmd.assetId);
+  if (!image) return;
+  const [width, height] = 'naturalWidth' in image ? [image.naturalWidth, image.naturalHeight] : [image.width, image.height];
+  const { left = 0, top = 0, right = 0, bottom = 0 } = cmd.crop ?? {};
+  const sw = width * (1 - left - right);
+  const sh = height * (1 - top - bottom);
+  if (!(sw > 0 && sh > 0 && cmd.w > 0 && cmd.h > 0)) return;
+  ctx.drawImage(image, width * left, height * top, sw, sh, cmd.x, cmd.y, cmd.w, cmd.h);
 }
 
 function paintClipped(
@@ -299,8 +335,9 @@ function paintText(ctx: CanvasRenderingContext2D, cmd: TextCmd): void {
     const align = cmd.align ?? 'left';
     ctx.textAlign = ALIGN_TO_TEXT_ALIGN[align];
     const lines = wrapLines(cmd.text, wrap.width, (run) => ctx.measureText(run).width);
-    lines.forEach((line, index) => {
-      paintRun(ctx, { ...cmd, y: wrappedLineY(cmd.y, index, lines.length, wrap) }, line, cmd.x, align);
+    const count = Math.min(lines.length, wrap.maxLines ?? lines.length);
+    lines.slice(0, count).forEach((line, index) => {
+      paintRun(ctx, { ...cmd, y: wrappedLineY(cmd.y, index, count, wrap) }, line, cmd.x, align);
     });
   } else {
     const align = cmd.align ?? 'left';

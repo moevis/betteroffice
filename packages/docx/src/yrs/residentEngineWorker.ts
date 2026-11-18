@@ -1483,7 +1483,12 @@ function reportProgress(): void {
 }
 Object.assign(globalThis, { __betterofficeEngineProgress: reportProgress });
 
+const WORKER_STARTED = Symbol.for('betteroffice.docx.worker.started');
+
 export function startWorker(workerScope: DedicatedWorkerGlobalScope): void {
+  const flags = workerScope as unknown as Record<symbol, unknown>;
+  if (flags[WORKER_STARTED]) return;
+  flags[WORKER_STARTED] = true;
   scope = workerScope;
   scope.onmessage = (
     event: MessageEvent<DocxEngineWorkerRequest | DocxEngineWorkerHostModule>
@@ -2314,7 +2319,7 @@ async function handle(request: ScheduledRequest): Promise<void> {
           mediaDataUrl: (source: string) => resident.mediaDataUrl(source),
         };
         const { anchor, focus } = request.read.selection;
-        const cells = session.cellSelection();
+        const cells = request.read.cells === undefined ? session.cellSelection() : request.read.cells;
         const multiCell = !!cells && (cells.anchor.story !== cells.head.story ||
           cells.anchor.tableIndex !== cells.head.tableIndex ||
           cells.anchor.row !== cells.head.row || cells.anchor.column !== cells.head.column);
@@ -2363,7 +2368,7 @@ async function handle(request: ScheduledRequest): Promise<void> {
         value = readResidentProperties(session, request.read.target);
         break;
       case 'sectionProperties':
-        value = session.sectionProperties();
+        value = session.sectionProperties(request.read.paragraphs);
         break;
       case 'exportStructuredWithPages': {
         if (commandLayout?.complete()) postCommandFrame(0);

@@ -19,6 +19,7 @@ import type { DocxEngineWorkerResponse } from './residentEngineWorkerProtocol';
 import type { DocxReviewTarget } from './residentReview';
 import type { YrsContentControlValue } from './index';
 import type { SectionProperties } from '../types/document';
+import type { TextWatermark } from '../types/content/watermark';
 import type { LayoutBlock } from '../layout/pagination/types';
 
 const TIMEOUT = 20_000;
@@ -40,7 +41,7 @@ beforeAll(async () => {
   startWorker = await residentWorkerFactory();
 }, 30_000);
 
-function syntheticDocument(headersFooters = false, notes = false, controls = false, bodyXml?: string, sectPr?: string, commentsXml?: string, commentsExtendedXml?: string, imageMedia = false): Uint8Array {
+function syntheticDocument(headersFooters = false, notes = false, controls = false, bodyXml?: string, sectPr?: string, commentsXml?: string, commentsExtendedXml?: string, imageMedia = false, headerXml?: string): Uint8Array {
   const parts = new Map<string, Uint8Array>();
   parts.set('[Content_Types].xml', toBytes(
     '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>'
@@ -70,7 +71,7 @@ function syntheticDocument(headersFooters = false, notes = false, controls = fal
     parts.set('word/_rels/document.xml.rels', toBytes(
       '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rIdHeader" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/header" Target="header.xml"/><Relationship Id="rIdFooter" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/footer" Target="footer.xml"/></Relationships>'
     ));
-    parts.set('word/header.xml', toBytes('<w:hdr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:p><w:r><w:t>H</w:t></w:r></w:p></w:hdr>'));
+    parts.set('word/header.xml', toBytes(headerXml ?? '<w:hdr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:p><w:r><w:t>H</w:t></w:r></w:p></w:hdr>'));
     parts.set('word/footer.xml', toBytes('<w:ftr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:p><w:r><w:t>F</w:t></w:r></w:p></w:ftr>'));
   }
   if (notes) {
@@ -101,11 +102,11 @@ function syntheticDocument(headersFooters = false, notes = false, controls = fal
   return new Uint8Array(rezipPartsToArrayBuffer(parts));
 }
 
-export async function openWorker(options: { collaboration?: boolean; headersFooters?: boolean; layoutWithRegions?: boolean; notes?: boolean; controls?: boolean; propertyImages?: boolean; objects?: boolean; imageMedia?: boolean; bodyXml?: string; sectPr?: string; comments?: string; displayWindow?: [number, number]; factory?: typeof startWorker; prepare?: (engine: Awaited<ReturnType<typeof createResidentEngineSession>>) => { story: string; paraId: string; offset: number }; commentsXml?: string; commentsExtendedXml?: string } = {}) {
+export async function openWorker(options: { collaboration?: boolean; headersFooters?: boolean; layoutWithRegions?: boolean; notes?: boolean; controls?: boolean; propertyImages?: boolean; objects?: boolean; imageMedia?: boolean; bodyXml?: string; sectPr?: string; comments?: string; displayWindow?: [number, number]; factory?: typeof startWorker; prepare?: (engine: Awaited<ReturnType<typeof createResidentEngineSession>>) => { story: string; paraId: string; offset: number }; commentsXml?: string; commentsExtendedXml?: string; headerXml?: string } = {}) {
   const worker = (options.factory ?? startWorker)(8301);
   const client = options.collaboration ? new DocxSourceWorkerClient(worker) : new ResidentEngineWorkerClient(worker);
   try {
-    const bytes = syntheticDocument(options.headersFooters, options.notes, options.controls, options.bodyXml, options.sectPr, options.commentsXml ?? options.comments, options.commentsExtendedXml, options.imageMedia);
+    const bytes = syntheticDocument(options.headersFooters, options.notes, options.controls, options.bodyXml, options.sectPr, options.commentsXml ?? options.comments, options.commentsExtendedXml, options.imageMedia, options.headerXml);
     if (client instanceof DocxSourceWorkerClient) await client.openSource({ bytes, collaboration: { clientId: 8301 } });
     else await client.open(bytes, { generation: 'd1-command-worker' });
     const engine = worker.sessions[0]!;
@@ -1259,6 +1260,27 @@ test('worker orders hyperlink note and watermark properties and refuses stale re
     const removed = await client.edit(intent(5, 3, 'setWatermark', { watermark: null, expectVersion: saved.version }));
     expect(removed.outcomes[0]?.status).toBe('applied');
     expect((await client.documentRead({ kind: 'properties', target: { kind: 'watermark' } })).value).toMatchObject({ watermark: null });
+  } finally { client.destroy(); }
+}, TIMEOUT);
+
+test('worker accepts a read word text watermark written back with new text', async () => {
+  const { client, initial } = await openWorker({
+    headersFooters: true,
+    headerXml: '<w:hdr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:v="urn:schemas-microsoft-com:vml"><w:sdt><w:sdtPr><w:docPartObj><w:docPartGallery w:val="Watermarks"/></w:docPartObj></w:sdtPr><w:sdtContent><w:p><w:r><w:pict>' +
+      '<v:shapetype id="_x0000_t136" coordsize="21600,21600"><v:textpath on="t" fitshape="t"/></v:shapetype>' +
+      '<v:shape id="PowerPlusWaterMarkObject1" type="#_x0000_t136" style="position:absolute;width:515.75pt;height:147.35pt;rotation:315" fillcolor="silver" stroked="f"><v:fill opacity=".5"/>' +
+      '<v:textpath style="font-family:&quot;Liberation Serif&quot;;font-size:1pt" string="SAMPLE"/></v:shape>' +
+      '</w:pict></w:r></w:p></w:sdtContent></w:sdt></w:hdr>',
+  });
+  try {
+    const read = (await client.documentRead({ kind: 'properties', target: { kind: 'watermark' } })).value as unknown as { watermark: TextWatermark };
+    expect(read.watermark).toMatchObject({ kind: 'text', text: 'SAMPLE', font: 'Liberation Serif' });
+    const written = await client.edit(intent(1, 0, 'setWatermark', {
+      watermark: { ...read.watermark, text: 'DRAFT' }, expectVersion: initial.frame.payload.documentVersion!,
+    }));
+    expect(written.outcomes[0]?.status).toBe('applied');
+    expect((await client.documentRead({ kind: 'properties', target: { kind: 'watermark' } })).value)
+      .toMatchObject({ watermark: { kind: 'text', text: 'DRAFT' } });
   } finally { client.destroy(); }
 }, TIMEOUT);
 
@@ -2835,6 +2857,62 @@ test('round two break sections preserve current and existing closing properties'
     expect((await client.edit(intent(2, 1, 'undo', {}))).outcomes[0]?.status).toBe('applied');
     expect(engine.paragraphs('body').map(paragraph => paragraph.text)).toEqual(['Seed', 'Tail']);
     expect(engine.sectionProperties().sections).toHaveLength(2);
+  } finally { client.destroy(); }
+}, TIMEOUT);
+
+test('a section read limited to paragraphs matches the full read through typing and section edits', async () => {
+  const { client, engine } = await openWorker({ bodyXml: '<w:p w14:paraId="00000001"><w:pPr><w:tabs><w:tab w:val="right" w:pos="4320"/></w:tabs><w:sectPr><w:type w:val="continuous"/></w:sectPr></w:pPr><w:r><w:t>Seed</w:t></w:r></w:p><w:p><w:r><w:t>Tail</w:t></w:r></w:p>' });
+  try {
+    const expectLimitedMatchesFull = async () => {
+      const full = (await client.documentRead({ kind: 'sectionProperties' })).value;
+      const wanted = engine.paragraphs('body').slice(0, 1).map(({ paraId }) => ({ story: 'body', paraId }));
+      const limited = (await client.documentRead({ kind: 'sectionProperties', paragraphs: [...wanted, { story: 'body', paraId: 'missing' }] })).value;
+      expect(limited).toEqual({ ...full, paragraphs: full.paragraphs.filter(({ paraId }) => paraId === wanted[0]!.paraId) });
+      return limited;
+    };
+    expect((await expectLimitedMatchesFull()).paragraphs[0]!.tabs).toEqual([expect.objectContaining({ alignment: 'right' })]);
+    expect((await client.edit(intent(1, 0, 'insertText', { text: '!' }))).outcomes[0]?.status).toBe('applied');
+    expect((await expectLimitedMatchesFull()).sections).toHaveLength(2);
+    expect((await client.edit(intent(2, 1, 'insertSectionBreak', { type: 'nextPage' }))).outcomes[0]?.status).toBe('applied');
+    expect((await expectLimitedMatchesFull()).sections).toHaveLength(3);
+    expect((await client.edit(intent(3, 2, 'insertSectionBreak', { type: 'nextPage' }))).outcomes[0]?.status).toBe('applied');
+    expect((await expectLimitedMatchesFull()).sections).toHaveLength(4);
+    expect((await client.edit(intent(4, 3, 'undo', {}))).outcomes[0]?.status).toBe('applied');
+    expect((await expectLimitedMatchesFull()).sections).toHaveLength(3);
+  } finally { client.destroy(); }
+}, TIMEOUT);
+
+test('a section read limited to paragraphs follows a remote paragraph id change', async () => {
+  const { client, engine } = await openWorker({ bodyXml: '<w:p w14:paraId="00000001"><w:pPr><w:sectPr><w:type w:val="continuous"/></w:sectPr></w:pPr><w:r><w:t>Seed</w:t></w:r></w:p><w:p><w:r><w:t>Tail</w:t></w:r></w:p>' });
+  const remote = await createYrsSession({ clientId: 8322 });
+  try {
+    const before = engine.paragraphs('body')[0]!.paraId;
+    expect((await client.documentRead({ kind: 'sectionProperties', paragraphs: [] })).value.sections[0]!.section).toBe(before);
+    remote.loadState(engine.encodeState());
+    remote.applyRawOps('body', [{ op: 'setEmbedAttr', index: remote.paragraphs('body')[0]!.text.length, key: 'paraId', value: 'remote-first' }]);
+    await client.applyRemoteUpdate(remote.encodeStateAsUpdate(engine.encodeStateVector()));
+    const after = engine.paragraphs('body')[0]!.paraId;
+    expect(after).not.toBe(before);
+    const full = (await client.documentRead({ kind: 'sectionProperties' })).value;
+    const limited = (await client.documentRead({ kind: 'sectionProperties', paragraphs: [] })).value;
+    expect(full.sections[0]!.section).toBe(after);
+    expect(limited.sections[0]!.section).toBe(after);
+    expect(limited.sections).toEqual(full.sections);
+  } finally { remote.destroy(); client.destroy(); }
+}, TIMEOUT);
+
+test('a section read limited to paragraphs follows a local paragraph id change', async () => {
+  const { client, engine } = await openWorker({ bodyXml: '<w:p w14:paraId="00000001"><w:pPr><w:sectPr><w:type w:val="continuous"/></w:sectPr></w:pPr><w:r><w:t>Seed</w:t></w:r></w:p><w:p><w:r><w:t>Tail</w:t></w:r></w:p>' });
+  try {
+    const before = engine.paragraphs('body')[0]!.paraId;
+    expect((await client.documentRead({ kind: 'sectionProperties', paragraphs: [] })).value.sections[0]!.section).toBe(before);
+    engine.applyRawOps('body', [{ op: 'setEmbedAttr', index: engine.paragraphs('body')[0]!.text.length, key: 'paraId', value: 'local-first' }]);
+    expect(engine.paragraphs('body')[0]!.paraId).toBe('local-first');
+    const full = (await client.documentRead({ kind: 'sectionProperties' })).value;
+    const limited = (await client.documentRead({ kind: 'sectionProperties', paragraphs: [] })).value;
+    expect(full.sections[0]!.section).toBe('local-first');
+    expect(limited.sections[0]!.section).toBe('local-first');
+    expect(limited.sections).toEqual(full.sections);
   } finally { client.destroy(); }
 }, TIMEOUT);
 

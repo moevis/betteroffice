@@ -107,15 +107,27 @@ async function buildFixture(): Promise<Uint8Array> {
   return zip.generateAsync({ type: 'uint8array', compression: 'DEFLATE' });
 }
 
+async function buildProtectedFixture(source: Uint8Array): Promise<Uint8Array> {
+  const zip = await JSZip.loadAsync(source);
+  const date = new Date('2024-01-01T00:00:00Z');
+  const unlocked = '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0" applyProtection="1"><protection locked="0"/></xf>';
+  zip.file('xl/styles.xml', STYLES.replace('<cellXfs count="2">', '<cellXfs count="3">').replace('</cellXfs>', `${unlocked}</cellXfs>`), { date });
+  const sheet = DATA_SHEET.replace('<row r="5">', '<row r="4"><c r="B4" s="2"><v>1</v></c></row><row r="5">').replace('</sheetData>', '</sheetData><sheetProtection sheet="1"/>');
+  zip.file('xl/worksheets/sheet1.xml', sheet, { date });
+  return zip.generateAsync({ type: 'uint8array', compression: 'DEFLATE' });
+}
+
 const wasmEngine: XlsxEngine = { ...wasmXlsx, font_preflight: wasmFontPreflight };
 const nativeEngine = createRequire(import.meta.url)('../xlsx-native/index.js') as XlsxEngine;
 const ENGINES = [['wasm', wasmEngine], ['native', nativeEngine]] as const;
 let fixture: Uint8Array;
+let protectedFixture: Uint8Array;
 
 beforeAll(async () => {
   await initWasm({ module_or_path: readFileSync(new URL('../../packages/xlsx/src/wasm/generated/xlsx_wasm_bg.wasm', import.meta.url)) });
   await initPreflight({ module_or_path: readFileSync(new URL('../../packages/xlsx/src/wasm/generated/preflight/xlsx_preflight_bg.wasm', import.meta.url)) });
   fixture = await buildFixture();
+  protectedFixture = await buildProtectedFixture(fixture);
 });
 
 // documentVersion() is "{nonce:32 hex}-{epoch}"; the nonce is minted per open.
@@ -353,6 +365,10 @@ const rows: Row<Xlsx>[] = [
   {
     method: 'XlsxDocument.openWithCalculationJson',
     call: ({ engine }) => scoped(engine.XlsxDocument.openWithCalculationJson(fixture, CONTEXT), (d) => [d.sheetInfoJson(), d.calculationStatusJson()]),
+  },
+  {
+    method: 'XlsxDocument.openRecalculatingStale',
+    call: ({ engine }) => scoped(engine.XlsxDocument.openRecalculatingStale(fixture, CONTEXT), (d) => [d.sheetInfoJson(), d.calculationStatusJson()]),
   },
   { method: 'XlsxDocument.openCollaborative', call: ({ engine }) => scoped(engine.XlsxDocument.openCollaborative(fixture, CLIENT), (d) => d.sheetInfoJson()) },
   {
@@ -679,6 +695,14 @@ const rows: Row<Xlsx>[] = [
     call: ({ doc }) => doc.translateFormulasJson(json([{ formula: 'B2*2', from: { row: 1, col: 2 }, to: { row: 4, col: 3 } }, { formula: 'A1', from: { row: 0, col: 0 }, to: { row: 0, col: 0 } }])),
   },
   { method: 'XlsxDocument.proposeJson', mutates: true, call: ({ doc }) => doc.proposeJson(json({ agentId: 'parity-agent', note: null, edits: [{ sheet: 0, row: 3, col: 1, input: '5' }] })) },
+  {
+    method: 'XlsxDocument.proposeJson',
+    name: 'XlsxDocument.proposeJson refuses a number format on a protected sheet',
+    throws: { name: 'string', reason: 'the sheet does not allow formatting cells', message: 'sheet "Data" is protected' },
+    call: ({ engine }) =>
+      scoped(engine.XlsxDocument.openWithCalculationJson(protectedFixture, CONTEXT), (d) =>
+        d.proposeJson(json({ agentId: 'parity-agent', note: null, edits: [{ sheet: 0, row: 3, col: 1, input: '5', numberFormat: { type: 'percent' } }] }))),
+  },
   defineRow({
     method: 'XlsxDocument.listProposalsJson',
     setup: ({ doc }: Xlsx) => propose(doc),
@@ -697,6 +721,19 @@ const rows: Row<Xlsx>[] = [
     call: ({ doc }, id) => doc.rejectProposalJson(json({ id })),
   }),
   { method: 'XlsxDocument.displayListJson', call: ({ doc }) => doc.displayListJson(VIEWPORT) },
+  {
+    method: 'XlsxDocument.displayListJson',
+    name: 'XlsxDocument.displayListJson (wrapped text in a row scrolled partly under the frozen pane)',
+    mutates: true,
+    call: ({ doc }) => {
+      const cell = { row: 1, col: 0 };
+      doc.applyOpsJson(json({ ops: [{ type: 'patchRangeStyle', sheet: 0, range: { start: cell, end: cell }, patch: { textWrapping: 'wrap' } }] }));
+      const list = JSON.parse(doc.displayListJson(json({ x: 0, y: 10, width: 800, height: 400 }))) as { commands: { wrap?: { maxLines?: number } }[] };
+      const wraps = list.commands.flatMap((command) => (command.wrap ? [command.wrap] : []));
+      if (wraps.length === 0 || wraps.some((wrap) => wrap.maxLines === undefined)) throw new Error(`no line limit: ${JSON.stringify(wraps)}`);
+      return wraps;
+    },
+  },
   { method: 'XlsxDocument.displayListForJson', call: ({ doc }) => doc.displayListForJson(1, VIEWPORT) },
   { method: 'XlsxDocument.pngDisplayListJson', call: ({ doc }) => doc.pngDisplayListJson(VIEWPORT) },
   { method: 'XlsxDocument.rangePngDisplayListJson', call: ({ doc }) => [doc.rangePngDisplayListJson('{}'), doc.rangePngDisplayListJson(json({ range: 'A1:C5', scale: 2 }))] },
@@ -714,6 +751,11 @@ const rows: Row<Xlsx>[] = [
     method: 'XlsxDocument.resizeChartJson',
     mutates: true,
     call: ({ doc }) => doc.resizeChartJson(json({ sheet: 0, chart: 'xl/drawings/drawing1.xml#0', left: 0, top: 0, right: 40, bottom: 30 })),
+  },
+  {
+    method: 'XlsxDocument.mediaBytes',
+    throws: { name: 'string', reason: 'no picture draws xl/media/image1.png' },
+    call: ({ doc }) => doc.mediaBytes('xl/media/image1.png'),
   },
   { method: 'XlsxDocument.cellRectJson', call: ({ doc }) => doc.cellRectJson(json({ sheet: 0, row: 4, col: 1 })) },
   { method: 'XlsxDocument.cellPositionJson', call: ({ doc }) => doc.cellPositionJson(json({ sheet: 0, row: 4, col: 0 })) },

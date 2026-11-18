@@ -314,7 +314,7 @@ export function XlsxPeerlessWorkerEditor(props: PeerlessSessionWorkbookProps) {
   ownerRef.current = run;
   const paintWithDefaultFonts = useDefaultFonts(run, run?.session.call.decodeFontFace, props.defaultFonts,
     () => { if (run?.current && !run.failure) sourceRef.current?.schedule(); },
-    () => { if (canvasRef.current) canvasRef.current.dataset.defaultFonts = 'settled'; });
+    () => { if (canvasRef.current) canvasRef.current.dataset.defaultFonts = 'settled'; }, props.remoteFonts);
   const sheetSelections = useMemo(() => new Map<string, Selection>(), [run]);
   const sheetScrolls = useMemo(() => new Map<string, { x: number; y: number }>(), [run]);
   const neighborFrames = useMemo(() => new Map<number, NeighborFrame>(), [run]);
@@ -1291,7 +1291,7 @@ export function XlsxPeerlessWorkerEditor(props: PeerlessSessionWorkbookProps) {
         canvas.height = Math.round(request.height * request.dpr);
         canvas.style.width = `${request.width}px`; canvas.style.height = `${request.height}px`;
         canvas.dataset.defaultFonts = paintWithDefaultFonts(frame.displayList,
-          () => paintDisplayList(context, frame.displayList, request.dpr * request.zoom, { x: 0, y: 0 }, request.zoom)) ? 'settled' : 'pending';
+          () => paintDisplayList(context, frame.displayList, request.dpr * request.zoom, { x: 0, y: 0 }, { zoom: request.zoom })) ? 'settled' : 'pending';
         canvas.dataset.workerSequence = String(frame.sequence);
         canvas.dataset.commandCoverage = String(frame.coversThroughSeq ?? 0);
         canvas.dataset.paintSource = frame.source; canvas.dataset.workerZoom = String(request.zoom);

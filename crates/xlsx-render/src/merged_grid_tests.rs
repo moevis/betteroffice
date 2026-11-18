@@ -78,6 +78,7 @@ fn frame_lines(wb: &Workbook, vp: &Viewport, print: Option<(&PrintMetrics, bool)
         SheetId(0),
         vp,
         &[],
+        &[],
         |chart| {
             Err::<ChartSpace, _>(RenderError::ChartSourceUnavailable {
                 part: chart.part.clone(),
@@ -644,13 +645,20 @@ fn print_grid_suppresses_merge_interiors_and_keeps_region_perimeter() {
             vp.x = geom.col_x(2) + 0.25;
             vp.y = geom.row_y(2) + 0.75;
         }
-        let dl =
-            build_print_display_list_with_charts(&wb, SheetId(0), &vp, &metrics, true, |chart| {
+        let dl = build_print_display_list_with_charts(
+            &wb,
+            SheetId(0),
+            &vp,
+            &metrics,
+            true,
+            &[],
+            |chart| {
                 Err::<ChartSpace, _>(RenderError::ChartSourceUnavailable {
                     part: chart.part.clone(),
                 })
-            })
-            .unwrap();
+            },
+        )
+        .unwrap();
         let offset = 48.0 / metrics.dpi;
         let x = geom.col_x(3) - vp.x + offset;
         let y = geom.row_y(3) - vp.y + offset;
