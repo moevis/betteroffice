@@ -1,0 +1,118 @@
+name: Font CDN assets
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish immutable assets after building and validating them
+        type: boolean
+        default: false
+      cdn_base:
+        description: Font CDN root
+        type: string
+        default: https://static-northstar.stepfun.com
+      cors_origin:
+        description: Consumer origin for CDN verification
+        type: string
+        default: https://northstar.c.stepfun-inc.net
+
+permissions:
+  contents: read
+
+concurrency:
+  group: font-cdn-assets
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.4.3'
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: ./.github/actions/wasm-toolchain
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/cache@v5
+        with:
+          path: .source/font-source-cache
+          key: font-sources-${{ hashFiles('scripts/fonts/*sources*', 'scripts/fonts/*lock*') }}
+      - name: Install pinned build tools
+        run: python -m pip install fonttools==4.60.1 brotli==1.1.0
+      - name: Build static font packer
+        run: cargo build --locked --release -p betteroffice-fonts --features build --bin fontpack
+      - name: Build verified static CJK faces and slices
+        run: scripts/fonts/build-cjk.sh .source/font-release/fonts-cjk
+      - name: Generate package resource URLs
+        run: bun scripts/fonts/generate-cjk-urls.ts .source/font-release/fonts-cjk/assets .source/font-release/fonts-cjk/src/index.ts
+      - name: Build matching font decoder
+        run: bun scripts/build-fonts-decoder.ts
+      - name: Stage manager assets
+        run: |
+          target=.source/font-release/fonts
+          mkdir -p "$target/assets" "$target/dist/decoder"
+          cp packages/fonts/package.json packages/fonts/LICENSE "$target/"
+          cp -R packages/fonts/LICENSES "$target/LICENSES"
+          cp packages/fonts/assets/base-latin.json packages/fonts/assets/BetterOfficeBaseLatin-*.ttf.zst "$target/assets/"
+          cp packages/fonts/dist/decoder/fontpack.wasm "$target/dist/decoder/"
+      - name: Stage release packages for Latin and international faces
+        run: |
+          for pack in fonts-latin fonts-intl; do
+            target=".source/font-release/$pack"
+            mkdir -p "$target/assets"
+            cp "packages/$pack/package.json" "packages/$pack/LICENSE" "$target/"
+            cp -R "packages/$pack/LICENSES" "$target/LICENSES"
+            cp "packages/$pack/assets/manifest.json" packages/$pack/assets/*.ttf.zst "$target/assets/"
+          done
+      - name: Validate release inventory
+        run: |
+          python scripts/fonts/publish-cdn.py .source/font-release/fonts-cjk
+          python scripts/fonts/publish-cdn.py .source/font-release/fonts-latin
+          python scripts/fonts/publish-cdn.py .source/font-release/fonts-intl
+          python scripts/fonts/publish-cdn.py .source/font-release/fonts
+      - uses: actions/upload-artifact@v6
+        with:
+          name: font-release-${{ github.sha }}
+          path: .source/font-release
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    if: inputs.publish
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    environment: font-cdn
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v7
+        with:
+          name: font-release-${{ github.sha }}
+          path: .source/font-release
+      - name: Install pinned publisher
+        run: python -m pip install tos==2.9.3
+      - name: Publish and verify every CDN resource
+        env:
+          TOS_ACCESS_KEY: ${{ secrets.TOS_ACCESS_KEY }}
+          TOS_SECRET_KEY: ${{ secrets.TOS_SECRET_KEY }}
+          TOS_ENDPOINT: ${{ vars.TOS_ENDPOINT }}
+          TOS_REGION: ${{ vars.TOS_REGION }}
+          TOS_BUCKET: ${{ vars.TOS_BUCKET }}
+          FONT_CDN_BASE: ${{ inputs.cdn_base }}
+          FONT_CORS_ORIGIN: ${{ inputs.cors_origin }}
+        run: |
+          python scripts/fonts/publish-cdn.py .source/font-release/fonts-cjk --publish --verify --cdn "$FONT_CDN_BASE" --origin "$FONT_CORS_ORIGIN"
+          python scripts/fonts/publish-cdn.py .source/font-release/fonts-latin --publish --verify --cdn "$FONT_CDN_BASE" --origin "$FONT_CORS_ORIGIN"
+          python scripts/fonts/publish-cdn.py .source/font-release/fonts-intl --publish --verify --cdn "$FONT_CDN_BASE" --origin "$FONT_CORS_ORIGIN"
+          python scripts/fonts/publish-cdn.py .source/font-release/fonts --publish --verify --cdn "$FONT_CDN_BASE" --origin "$FONT_CORS_ORIGIN"

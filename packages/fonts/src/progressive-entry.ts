@@ -38,7 +38,8 @@ export function openSlicedFace(location: SliceLocation): Promise<ProgressiveFont
       return openProgressiveFace(ref, {
         read: async (file) => {
           const asset = file === ref.index ? indexUrl : await url(file);
-          return readFontAsset(file, asset, requestTimeoutMs ? requestTimeoutMs(asset) : timeoutMs);
+          const timeout = requestTimeoutMs ? requestTimeoutMs(asset) : timeoutMs;
+          return readFontAsset(file, asset, timeout);
         },
         url,
         timeoutMs: transportTimeout,

@@ -230,6 +230,40 @@ test('opening rejects an index whose SHA-256 differs from the manifest pointer',
     .rejects.toThrow('SHA-256 mismatch');
 });
 
+test('a corrupt HTTP index is discarded so a corrected CDN resource can open', async () => {
+  let corrupt = true;
+  let indexReads = 0;
+  const server = Bun.serve({
+    port: 0,
+    async fetch(request) {
+      const file = new URL(request.url).pathname.slice(1);
+      const bytes = new Uint8Array(await read(file));
+      if (file === jpRef.index) {
+        indexReads++;
+        if (corrupt) bytes[0] ^= 1;
+      }
+      return new Response(bytes);
+    },
+  });
+  try {
+    const location: SliceLocation = {
+      ref: jpRef,
+      base: server.url.href,
+      url: async file => new URL(file, server.url),
+      decode: async (encoded, maxOutput) => (await decodeFontFace(encoded, undefined, { maxOutput })).font,
+    };
+    await expect(openSlicedFace(location)).rejects.toThrow('SHA-256 mismatch');
+    corrupt = false;
+    const actual = await openSlicedFace(location);
+    const expected = await openProgressiveFace(jpRef, transport([]));
+    await Promise.all([actual.ensureText('日本語'), expected.ensureText('日本語')]);
+    expect(sha(actual.bytes())).toBe(sha(expected.bytes()));
+    expect(indexReads).toBe(2);
+  } finally {
+    server.stop(true);
+  }
+});
+
 test('a served index, skeleton, core or chunk changed at its recorded length is refused by its SHA-256', async () => {
   const index = JSON.parse(await Bun.file(new URL(jpRef.index, assets)).text()) as Index;
   await expect(openProgressiveFace(jpRef, flipping(jpRef.index))).rejects.toThrow(`Font slice index ${jpRef.index} SHA-256 mismatch`);

@@ -3,6 +3,11 @@ import { createHash } from 'node:crypto';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import baseLatin from '../assets/base-latin.json';
+import { version as fontsVersion } from '../package.json';
+import { version as latinVersion } from '../../fonts-latin/package.json';
+import { version as intlVersion } from '../../fonts-intl/package.json';
+import { version as cjkVersion } from '../../fonts-cjk/package.json';
 import latin from '../../fonts-latin/assets/manifest.json';
 import intl from '../../fonts-intl/assets/manifest.json';
 import cjk from '../../fonts-cjk/assets/manifest.json';
@@ -44,22 +49,23 @@ for (const [name, manifest, exported] of [
 const fonts = await import('./index');
 const originalFetch = globalThis.fetch;
 const decoder: FontDecoder = (bytes, options) => decodeFontFace(bytes, options.dict, options);
-const hash = (bytes: ArrayBuffer) => createHash('sha256').update(new Uint8Array(bytes)).digest('hex');
+const hash = (bytes: ArrayBuffer | Uint8Array) => createHash('sha256').update(bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes)).digest('hex');
 const regular = fonts.resolveMetricCompatFace('Calibri', false, false)!;
 const japanese = fonts.resolveScriptFallbackFace('cjk-jp', false, false)!;
 const runtime = { decoder, retain: false, strict: true };
-const asset = (pack: string, file: string) => new URL(`../../fonts-${pack}/assets/${file}`, import.meta.url);
+const asset = (pack: string, file: string) => new URL(pack === 'base-latin'
+  ? `../assets/${file}` : `../../fonts-${pack}/assets/${file}`, import.meta.url);
 
 function serveAssets(requests: string[], inspect?: (url: URL, options?: RequestInit) => void): void {
   globalThis.fetch = (async (input: RequestInfo | URL, options?: RequestInit) => {
     const url = new URL(String(input));
-    if (url.pathname.endsWith('.wasm')) return fontAssetResponse(input);
     requests.push(url.href);
     inspect?.(url, options);
+    if (url.pathname.endsWith('/dist/decoder/fontpack.wasm')) return fontAssetResponse(input);
     if (url.protocol === 'file:') return new Response(await Bun.file(url).arrayBuffer());
-    const match = url.pathname.match(/\/(latin|intl|cjk)\/[^/]+\/(.+)$/);
+    const match = url.pathname.match(/\/fonts(?:-(latin|intl|cjk))?\/[^/]+\/assets\/(.+)$/);
     if (!match) return fontAssetResponse(input);
-    return new Response(await Bun.file(asset(match[1]!, match[2]!)).arrayBuffer());
+    return new Response(await Bun.file(asset(match[1] ?? 'base-latin', match[2]!)).arrayBuffer());
   }) as typeof fetch;
 }
 
@@ -100,27 +106,23 @@ test('session clients and separate package copies share font CDN configuration',
   expect(getFontCdnConfiguration()).toEqual({ baseUrl: configured.baseUrl, timeoutMs: 30_000 });
 });
 
-test('a missing Latin pack loads pinned bytes with private requests and a package decoder', async () => {
+test('a missing Latin pack loads pinned bytes with private requests and the configured decoder', async () => {
   const requests: string[] = [];
-  const decoderRequests: string[] = [];
-  fonts.configureFontCdn({ baseUrl: new URL('https://configured.example/fonts') });
+  fonts.configureFontCdn({ baseUrl: new URL('https://configured.example/') });
   serveAssets(requests, (_url, options) => {
     expect(options?.credentials).toBe('omit');
     expect(options?.referrerPolicy).toBe('no-referrer');
     expect(options?.signal).toBeInstanceOf(AbortSignal);
   });
-  const fetchAsset = globalThis.fetch;
-  globalThis.fetch = ((input: RequestInfo | URL, options?: RequestInit) => {
-    if (String(input).endsWith('.wasm')) decoderRequests.push(String(input));
-    return fetchAsset(input, options);
-  }) as typeof fetch;
   expect(await fonts.bundledFaceInstalled(regular)).toBe(true);
   expect(requests).toEqual([]);
   const bytes = await fonts.loadBundledFontBytes(regular);
   expect(bytes.byteLength).toBe(regular.byteLength);
   expect(hash(bytes)).toBe(latin.faces.find(({ file }) => file === regular.file)!.sha256);
-  expect(requests).toEqual([`https://configured.example/fonts/latin/${latin.version}/${regular.file}`]);
-  expect(decoderRequests.every((url) => !url.startsWith('https://configured.example/'))).toBe(true);
+  expect(requests).toEqual([
+    `https://configured.example/fonts-latin/${latinVersion}/assets/${regular.file}`,
+    `https://configured.example/fonts/${fontsVersion}/dist/decoder/fontpack.wasm`,
+  ]);
 });
 
 test('an explicit asset root keeps its existing request policy', async () => {
@@ -129,15 +131,21 @@ test('an explicit asset root keeps its existing request policy', async () => {
   serveAssets(requests, (_url, options) => expect(options).toBeUndefined());
   await fonts.loadBundledFontBytes(regular, { baseUrl: 'https://explicit.example/' }, runtime);
   expect(requests).toEqual([`https://explicit.example/${regular.file}`]);
+  const location = fonts.createFontProvider({ baseUrl: 'https://explicit.example/' }, runtime)
+    .resolveScriptFallback('cjk-jp', false, false)!.slices!;
+  expect(location.base).toBe('https://explicit.example/');
+  expect((await location.url(location.ref.index)).href).toBe(`https://explicit.example/${location.ref.index}`);
 });
 
-test('base Latin stays in the package when a CDN is configured', async () => {
+test('base Latin remains local when a CDN is configured', async () => {
   const requests: string[] = [];
+  const entry = baseLatin.faces.find(({ file }) => file === 'BetterOfficeBaseLatin-Regular.ttf.zst')!;
   fonts.configureFontCdn({ baseUrl: 'https://base-latin.example/' });
   serveAssets(requests);
   const bytes = await fonts.createFontProvider(undefined, runtime).resolveBaseLatin!(false, false)!();
-  expect(bytes.byteLength).toBeGreaterThan(0);
-  expect(requests.every((url) => !url.startsWith('https://base-latin.example/'))).toBe(true);
+  expect(bytes.byteLength).toBe(entry.byteLength);
+  expect(hash(bytes)).toBe(entry.sha256);
+  expect(requests).toEqual([]);
 });
 
 test('a dictionary prerequisite uses the same pack version directory', async () => {
@@ -150,7 +158,7 @@ test('a dictionary prerequisite uses the same pack version directory', async () 
   expect(hash(bytes)).toBe(entry.sha256);
   expect(entry.dict).not.toBeNull();
   expect(requests.sort()).toEqual([entry.file, entry.dict].map((file) =>
-    `https://dictionary.example/root/latin/${latin.version}/${file}`).sort());
+    `https://dictionary.example/root/fonts-latin/${latinVersion}/assets/${file}`).sort());
 });
 
 test('404 and timeout failures are evicted so the same request can succeed', async () => {
@@ -210,8 +218,12 @@ test('CJK indexes, skeletons and chunks use the CJK version and preserve worker 
   serveAssets(requests, (_url, options) => {
     expect(options?.credentials).toBe('omit');
     expect(options?.referrerPolicy).toBe('no-referrer');
+    expect(options?.signal).toBeInstanceOf(AbortSignal);
   });
   const location = fonts.createFontProvider(undefined, runtime).resolveScriptFallback('cjk-jp', false, false)!.slices!;
+  expect(location.base).toBe(`https://sliced.example/fonts-cjk/${cjkVersion}/assets/`);
+  expect(location.timeoutMs).toBe(1234);
+  expect(location.requestTimeoutMs?.(await location.url(location.ref.index))).toBe(1234);
   const face = await openSlicedFace(location);
   const entry = cjk.faces.find(({ file }) => file === japanese.file)!;
   const index = JSON.parse(await Bun.file(asset('cjk', entry.slices!.index)).text()) as { skeleton: { file: string } };
@@ -221,12 +233,59 @@ test('CJK indexes, skeletons and chunks use the CJK version and preserve worker 
   while (codepoint <= 0x9fff && skeleton.chunkOfCodepoint(codepoint) !== 1) codepoint++;
   expect(codepoint).toBeLessThanOrEqual(0x9fff);
   await face.ensureText(String.fromCodePoint(codepoint));
-  expect(requests).toContain(`https://sliced.example/cjk/${cjk.version}/${location.ref.index}`);
+  expect(requests).toContain(`https://sliced.example/fonts-cjk/${cjkVersion}/assets/${location.ref.index}`);
   expect(requests.some((url) => /\/c\d+\.zst$/.test(url))).toBe(true);
-  expect(requests.every((url) => url.startsWith(`https://sliced.example/cjk/${cjk.version}/`))).toBe(true);
+  expect(requests.every((url) => url.startsWith(`https://sliced.example/fonts-cjk/${cjkVersion}/assets/`))).toBe(true);
   const source = await sliceSourceOf(face)!;
   expect(source.timeoutMs).toBe(1234);
-  expect(Object.values(source.urls).every((url) => url.startsWith(`https://sliced.example/cjk/${cjk.version}/`))).toBe(true);
+  expect(Object.values(source.urls).every((url) => url.startsWith(`https://sliced.example/fonts-cjk/${cjkVersion}/assets/`))).toBe(true);
+});
+
+test('CJK slices and their decoder share the configured published CDN root without a runtime decoder', async () => {
+  const host = globalThis.process as unknown as { getBuiltinModule?: (id: string) => unknown };
+  const original = host.getBuiltinModule;
+  host.getBuiltinModule = (id: string) => id === 'node:zlib' ? {} : original?.call(host, id);
+  try {
+    const requests: string[] = [];
+    fonts.configureFontCdn({ baseUrl: 'https://sliced-decoder.example/' });
+    serveAssets(requests, (_url, options) => {
+      expect(options?.credentials).toBe('omit');
+      expect(options?.referrerPolicy).toBe('no-referrer');
+      expect(options?.signal).toBeInstanceOf(AbortSignal);
+    });
+    const location = fonts.createFontProvider(undefined, { retain: false })
+      .resolveScriptFallback('cjk-jp', false, false)!.slices!;
+    const face = await openSlicedFace(location);
+    await face.ensureText('日本語');
+    const slicedRequests = requests.filter((url) => !url.endsWith('.wasm'));
+    expect(slicedRequests).toContain(`https://sliced-decoder.example/fonts-cjk/${cjkVersion}/assets/${location.ref.index}`);
+    expect(slicedRequests.every((url) => url.startsWith(`https://sliced-decoder.example/fonts-cjk/${cjkVersion}/assets/`))).toBe(true);
+    expect(requests.filter((url) => url.endsWith('.wasm'))).toEqual([
+      `https://sliced-decoder.example/fonts/${fontsVersion}/dist/decoder/fontpack.wasm`,
+    ]);
+  } finally {
+    host.getBuiltinModule = original;
+  }
+});
+
+test('the standalone decoder uses the configured CDN and a failed load can be attempted again', async () => {
+  const root = 'https://decoder-required.example/';
+  fonts.configureFontCdn({ baseUrl: root });
+  const requests: string[] = [];
+  let unavailable = true;
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    requests.push(String(input));
+    return unavailable ? new Response(null, { status: 404 }) : fontAssetResponse(input);
+  }) as typeof fetch;
+  const encoded = await Bun.file(asset('latin', regular.file)).arrayBuffer();
+  const options = { codec: latin.faces.find(({ file }) => file === regular.file)!.codec };
+  const expected = `${root}fonts/${fontsVersion}/dist/decoder/fontpack.wasm`;
+  await expect(fonts.decodeFontFaceOutsideEngine(encoded, options)).rejects.toThrow('Font decoder wasm not found');
+  expect(requests).toEqual([expected]);
+  unavailable = false;
+  const result = await fonts.decodeFontFaceOutsideEngine(encoded, options);
+  expect(hash(result.font)).toBe(latin.faces.find(({ file }) => file === regular.file)!.sha256);
+  expect(requests).toEqual([expected, expected]);
 });
 
 test('every sliced CDN file validates its bytes and failed chunks can retry', async () => {
@@ -241,18 +300,18 @@ test('every sliced CDN file validates its bytes and failed chunks can retry', as
   expect(chunkGlyph).toBeLessThan(skeleton.numGlyphs);
   for (const target of [entry.slices!.index, index.skeleton.file, index.core.file, index.chunks[0]!.file]) {
     fonts.configureFontCdn({ baseUrl: `https://sliced-integrity.example/${encodeURIComponent(target)}/` });
-    const poisoned = new WeakSet<object>();
+    const poisoned = new Set<string>();
     let tamper = true;
     globalThis.fetch = (async (input: RequestInfo | URL) => {
       if (String(input).endsWith('.wasm')) return fontAssetResponse(input);
-      const file = new URL(String(input)).pathname.split(`/cjk/${cjk.version}/`)[1]!;
+      const file = new URL(String(input)).pathname.split(`/fonts-cjk/${cjkVersion}/assets/`)[1]!;
       const bytes = new Uint8Array(await Bun.file(asset('cjk', file)).arrayBuffer());
       if (tamper && file === target && file.endsWith('.json')) bytes[0] ^= 1;
       return new Response(bytes);
     }) as typeof fetch;
     const checked: FontDecoder = async (encoded, options) => {
       const response = await decoder(encoded, options);
-      if (tamper && poisoned.has(encoded)) new Uint8Array(response.font)[0] ^= 1;
+      if (tamper && poisoned.has(hash(encoded))) new Uint8Array(response.font)[0] ^= 1;
       return response;
     };
     const fetchAsset = globalThis.fetch;
@@ -262,7 +321,7 @@ test('every sliced CDN file validates its bytes and failed chunks can retry', as
         const read = response.arrayBuffer.bind(response);
         response.arrayBuffer = async () => {
           const bytes = await read();
-          poisoned.add(bytes);
+          poisoned.add(hash(bytes));
           return bytes;
         };
       }
@@ -282,7 +341,7 @@ test('every sliced CDN file validates its bytes and failed chunks can retry', as
   }
 });
 
-test('the future jsDelivr mapper matches the existing CDN entry and uses npm versions', async () => {
+test('the jsDelivr mapper matches the existing CDN entry and uses npm versions', async () => {
   const { createFontProvider } = await import('./cdn');
   const requests: string[] = [];
   globalThis.fetch = (async (input: RequestInfo | URL) => {
@@ -295,12 +354,17 @@ test('the future jsDelivr mapper matches the existing CDN entry and uses npm ver
   await provider.resolveScriptFallback('thai', false, false)!();
   const slices = provider.resolveScriptFallback('cjk-jp', false, false)!.slices!;
   for (const [pack, file] of [[latin, regular.file], [intl, fonts.resolveScriptFallbackFace('thai', false, false)!.file]] as const) {
-    expect(requests).toContain(fontCdnAssetUrl({ ...pack, version: 'manifest-version-is-unused' }, file).href);
+    const version = pack.pack === 'latin' ? latinVersion : intlVersion;
+    const expected = `https://cdn.jsdelivr.net/npm/@betteroffice/fonts-${pack.pack}@${version}/assets/${file}`;
+    expect(fontCdnAssetUrl(pack.pack, file).href).toBe(expected);
+    expect(requests).toContain(expected);
   }
-  expect((await slices.url(slices.ref.index)).href).toBe(fontCdnAssetUrl(cjk, slices.ref.index).href);
+  const expected = `https://cdn.jsdelivr.net/npm/@betteroffice/fonts-cjk@${cjkVersion}/assets/${slices.ref.index}`;
+  expect(fontCdnAssetUrl(cjk.pack, slices.ref.index).href).toBe(expected);
+  expect((await slices.url(slices.ref.index)).href).toBe(expected);
 });
 
-test('the CDN tree serves Latin, intl and sliced CJK faces from a local origin', async () => {
+test('the CDN tree serves base Latin, Latin, intl, sliced CJK and the decoder from a local origin', async () => {
   const output = await mkdtemp(join(tmpdir(), 'font-cdn-tree-'));
   const requests: string[] = [];
   let server: ReturnType<typeof Bun.serve> | undefined;
@@ -315,39 +379,77 @@ test('the CDN tree serves Latin, intl and sliced CJK faces from a local origin',
       },
     });
     fonts.configureFontCdn({ baseUrl: server.url });
-    globalThis.fetch = ((input: RequestInfo | URL, options?: RequestInit) =>
-      String(input).endsWith('.wasm') ? fontAssetResponse(input) : originalFetch(input, options)) as typeof fetch;
-    const provider = fonts.createFontProvider(undefined, runtime);
+    globalThis.fetch = originalFetch;
+    const provider = fonts.createFontProvider(undefined, { retain: false });
     expect((await provider.resolve('Calibri', false, false)!()).byteLength).toBe(regular.byteLength);
     const thai = fonts.resolveScriptFallbackFace('thai', false, false)!;
     expect((await provider.resolveScriptFallback('thai', false, false)!()).byteLength).toBe(thai.byteLength);
+    const baseLatinEntry = baseLatin.faces.find(({ file }) => file === 'BetterOfficeBaseLatin-Regular.ttf.zst')!;
+    const baseLatinBytes = await provider.resolveBaseLatin!(false, false)!();
+    expect(baseLatinBytes.byteLength).toBe(baseLatinEntry.byteLength);
+    expect(hash(baseLatinBytes)).toBe(baseLatinEntry.sha256);
     const location = provider.resolveScriptFallback('cjk-jp', false, false)!.slices!;
     const face = await openSlicedFace(location);
     await face.ensureText('日本語');
-    expect(requests).toContain(`latin/${latin.version}/${regular.file}`);
-    expect(requests).toContain(`intl/${intl.version}/${thai.file}`);
-    expect(requests).toContain(`cjk/${cjk.version}/${location.ref.index}`);
-    for (const pack of [latin, intl, cjk]) {
-      expect(await Bun.file(join(output, pack.pack, pack.version, 'manifest.json')).exists()).toBe(true);
+    expect(requests).toContain(`fonts-latin/${latinVersion}/assets/${regular.file}`);
+    expect(requests).toContain(`fonts-intl/${intlVersion}/assets/${thai.file}`);
+    expect(requests).toContain(`fonts-cjk/${cjkVersion}/assets/${location.ref.index}`);
+    expect(requests).not.toContain(`fonts/${fontsVersion}/assets/${baseLatinEntry.file}`);
+    expect(requests).toContain(`fonts/${fontsVersion}/dist/decoder/fontpack.wasm`);
+    for (const [name, version] of [['latin', latinVersion], ['intl', intlVersion], ['cjk', cjkVersion]] as const) {
+      expect(await Bun.file(join(output, `fonts-${name}`, version, 'assets/manifest.json')).exists()).toBe(true);
     }
-    expect(await Bun.file(join(output, 'latin', latin.version, 'decoder/fontpack.wasm')).exists()).toBe(false);
+    expect(await Bun.file(join(output, 'fonts', fontsVersion, 'dist/decoder/fontpack.wasm')).exists()).toBe(true);
+    expect(await Bun.file(join(output, 'fonts', fontsVersion, 'assets/base-latin.json')).exists()).toBe(true);
   } finally {
     server?.stop(true);
     await rm(output, { recursive: true, force: true });
   }
 }, 60_000);
 
-test('installed packs win over a configured CDN without changing their request policy', async () => {
+test('installed packs take precedence over the configured CDN', async () => {
   installed = true;
-  fonts.configureFontCdn({ baseUrl: 'https://unused.example/' });
-  const requests: string[] = [];
-  serveAssets(requests, (_url, options) => expect(options).toBeUndefined());
-  for (const face of [regular, fonts.resolveScriptFallbackFace('thai', false, false)!, japanese]) {
-    expect((await fonts.loadBundledFontBytes(face, undefined, runtime)).byteLength).toBe(face.byteLength);
+  try {
+    fonts.configureFontCdn({ baseUrl: 'https://installed.example/' });
+    const requests: string[] = [];
+    serveAssets(requests, (_url, options) => {
+      expect(options?.credentials).toBe('omit');
+      expect(options?.referrerPolicy).toBe('no-referrer');
+      expect(options?.signal).toBeInstanceOf(AbortSignal);
+    });
+    const thai = fonts.resolveScriptFallbackFace('thai', false, false)!;
+    for (const face of [regular, thai, japanese]) {
+      expect((await fonts.loadBundledFontBytes(face, undefined, runtime)).byteLength).toBe(face.byteLength);
+    }
+    const location = fonts.createFontProvider(undefined, runtime).resolveScriptFallback('cjk-jp', false, false)!.slices!;
+    const sliced = await openSlicedFace(location);
+    await sliced.ensureText('日本語');
+    expect(location.timeoutMs).toBe(30_000);
+    expect((await sliceSourceOf(sliced)!).timeoutMs).toBeUndefined();
+    expect(requests).toEqual([]);
+  } finally {
+    installed = false;
   }
-  const location = fonts.createFontProvider(undefined, runtime).resolveScriptFallback('cjk-jp', false, false)!.slices!;
-  const sliced = await openSlicedFace(location);
-  await sliced.ensureText('日本語');
-  expect((await sliceSourceOf(sliced)!).timeoutMs).toBeUndefined();
-  expect(requests.every((url) => !url.startsWith('https://unused.example/'))).toBe(true);
+});
+
+
+test('a configured CDN failure is not masked when the local pack is installed', async () => {
+  installed = true;
+  try {
+    fonts.configureFontCdn({ baseUrl: 'https://failing-installed.example/' });
+    const requests: string[] = [];
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      requests.push(String(input));
+      return new Response(null, { status: 503 });
+    }) as typeof fetch;
+    for (const face of [regular, fonts.resolveScriptFallbackFace('thai', false, false)!, japanese]) {
+      expect((await fonts.loadBundledFontBytes(face, undefined, runtime)).byteLength).toBe(face.byteLength);
+    }
+    const location = fonts.createFontProvider(undefined, runtime).resolveScriptFallback('cjk-jp', false, false)!.slices!;
+    const sliced = await openSlicedFace(location);
+    await sliced.ensureText('日本語');
+    expect(requests).toEqual([]);
+  } finally {
+    installed = false;
+  }
 });

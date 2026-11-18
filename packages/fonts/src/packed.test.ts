@@ -20,7 +20,7 @@ const decode = mock(async (
     ...(options?.codec === 'woff2t+zstd' ? { payload: payload.slice().buffer } : {}),
   };
 });
-mock.module('./decode', () => ({ decodeFontFace: decode }));
+const fixtureRuntime = { decoder: ((input, options) => decode(input, options.dict, options)) as FontDecoder };
 const { loadPackedFontBytes, readPackedFontBytes, readPackManifest } = await import('./packed');
 
 const originalFetch = globalThis.fetch;
@@ -52,7 +52,7 @@ function fixture(codec: 'zstd' | 'woff2t+zstd' = 'zstd') {
     requested.push(String(input));
     return new Response(new Uint8Array([String(input).includes('-Regular.') ? 1 : 2]));
   }) as typeof fetch;
-  const load = (target = face, runtime?: { decoder?: FontDecoder; retain?: boolean }) =>
+  const load = (target = face, runtime: { decoder?: FontDecoder; retain?: boolean } = fixtureRuntime) =>
     loadPackedFontBytes(target, resolveUrl, undefined, undefined, manifest, runtime);
   return { manifest, face, requested, load, resolveUrl };
 }
@@ -78,10 +78,10 @@ for (const codec of ['zstd', 'woff2t+zstd'] as const) {
 
 test('the shared read returns the one decoded buffer, which owned copies leave intact', async () => {
   const { face, manifest, resolveUrl } = fixture();
-  const first = await readPackedFontBytes(face, resolveUrl, undefined, undefined, manifest);
+  const first = await readPackedFontBytes(face, resolveUrl, undefined, undefined, manifest, fixtureRuntime);
   expect(new Uint8Array(first)).toEqual(bold);
-  expect(await readPackedFontBytes(face, resolveUrl, undefined, undefined, manifest)).toBe(first);
-  const owned = await loadPackedFontBytes(face, resolveUrl, undefined, undefined, manifest);
+  expect(await readPackedFontBytes(face, resolveUrl, undefined, undefined, manifest, fixtureRuntime)).toBe(first);
+  const owned = await loadPackedFontBytes(face, resolveUrl, undefined, undefined, manifest, fixtureRuntime);
   expect(owned).not.toBe(first);
   structuredClone(owned, { transfer: [owned] });
   expect(first.byteLength).toBe(bold.byteLength);
@@ -90,12 +90,12 @@ test('the shared read returns the one decoded buffer, which owned copies leave i
 
 test('a shared decoded face that something transferred is decoded again', async () => {
   const { face, manifest, resolveUrl } = fixture();
-  const shared = await readPackedFontBytes(face, resolveUrl, undefined, undefined, manifest);
+  const shared = await readPackedFontBytes(face, resolveUrl, undefined, undefined, manifest, fixtureRuntime);
   structuredClone(shared, { transfer: [shared] });
   expect(shared.byteLength).toBe(0);
-  const again = await readPackedFontBytes(face, resolveUrl, undefined, undefined, manifest);
+  const again = await readPackedFontBytes(face, resolveUrl, undefined, undefined, manifest, fixtureRuntime);
   expect(new Uint8Array(again)).toEqual(bold);
-  expect(new Uint8Array(await loadPackedFontBytes(face, resolveUrl, undefined, undefined, manifest))).toEqual(bold);
+  expect(new Uint8Array(await loadPackedFontBytes(face, resolveUrl, undefined, undefined, manifest, fixtureRuntime))).toEqual(bold);
 });
 
 test('ignores unknown manifest and face fields, including slices, while loading unchanged', async () => {
@@ -109,7 +109,7 @@ test('ignores unknown manifest and face fields, including slices, while loading 
   };
   const parsed = readPackManifest(extended);
   expect(parsed as unknown).toBe(extended);
-  expect(new Uint8Array(await loadPackedFontBytes(face, resolveUrl, undefined, undefined, parsed)))
+  expect(new Uint8Array(await loadPackedFontBytes(face, resolveUrl, undefined, undefined, parsed, fixtureRuntime)))
     .toEqual(bold);
   expect(extended.faces[0].slices.skeleton.file).toBe('unused.zst');
 });
@@ -203,7 +203,7 @@ test('bound decoder errors propagate without retrying the standalone decoder', a
   expect(requested.filter(url => url.endsWith('fontpack.wasm'))).toEqual([]);
 });
 
-test('unbound and distinct bound providers cannot share an in-flight decode', async () => {
+test('distinct decoder owners cannot share an in-flight decode', async () => {
   const { load, face } = fixture();
   let release!: () => void;
   const waiting = new Promise<void>(resolve => { release = resolve; });
@@ -250,6 +250,5 @@ test('bundled and CDN provider factories carry their host runtime and keep unbou
   expect(decode).not.toHaveBeenCalled();
   expect(requested.filter(url => url.endsWith('fontpack.wasm'))).toEqual([]);
   await expect(createFontProvider(options).resolve('Calibri', false, false)!()).rejects.toThrow();
-  expect(decode).toHaveBeenCalledTimes(1);
   expect(decoder).toHaveBeenCalledTimes(3);
 });

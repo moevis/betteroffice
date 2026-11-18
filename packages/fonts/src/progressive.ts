@@ -153,7 +153,9 @@ async function readFile(transport: SliceTransport, entry: SliceFile): Promise<Ui
 export async function openProgressiveFace(ref: SliceRef, transport: SliceTransport): Promise<ProgressiveFontFace> {
   if (ref.format !== 1) throw new Error(`Unsupported font slice format ${ref.format}`);
   const indexBytes = await transport.read(ref.index);
-  if (await sha256(indexBytes) !== ref.indexSha256) throw new Error(`Font slice index ${ref.index} SHA-256 mismatch`);
+  if (await sha256(indexBytes) !== ref.indexSha256) {
+    throw new Error(`Font slice index ${ref.index} SHA-256 mismatch`);
+  }
   const index = JSON.parse(new TextDecoder().decode(indexBytes)) as SliceIndex;
   if (index.format !== 1) throw new Error(`Unsupported font slice index format in ${ref.index}`);
   const [skeletonBytes, core] = await Promise.all([readFile(transport, index.skeleton), readFile(transport, index.core)]);

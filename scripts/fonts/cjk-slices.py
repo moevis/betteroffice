@@ -41,7 +41,11 @@ REGIONS = {
     "NotoSansKR": "korean",
     "NotoSansSC": "simplified-chinese",
     "NotoSansTC": "traditional-chinese",
+    "NotoSerifJP": "japanese",
+    "NotoSerifKR": "korean",
     "NotoSerifSC": "simplified-chinese",
+    "NotoSerifTC": "traditional-chinese",
+    "NorthstarKai": "simplified-chinese",
 }
 
 
@@ -275,13 +279,28 @@ def cff_prefix(cff):
     _, after_strings = read_index(data, after_tops)
     top_start, top_end = tops[0]
     top = dict(read_dict(data, top_start, top_end))
-    if (12, 30) not in top:
-        raise ValueError("expected a CID-keyed CFF")
     charstrings, _ = read_index(data, top[17][0][0])
     num_glyphs = len(charstrings)
     charset = top[15][0][0]
-    fd_select = top[(12, 37)][0][0]
     charset_bytes = data[charset:charset + charset_length(data, charset, num_glyphs)]
+    if (12, 30) not in top:
+        size, offset = top[18]
+        private = private_without_subrs(data, offset[0], offset[0] + size[0])
+
+        def layout(offsets):
+            top_dict = dict_with_offsets(data, top_start, top_end, offsets)
+            head = header + data[len(header):after_names] + build_index([top_dict]) + data[after_tops:after_strings] + b"\0\0"
+            out = head + charset_bytes
+            positions = {15: len(head), 18: (len(private), len(out)), 17: len(out) + len(private)}
+            return out + private, positions
+
+        _, positions = layout({15: 0, 18: (len(private), 0), 17: 0})
+        prefix, check = layout(positions)
+        if check != positions:
+            raise ValueError("CFF layout did not converge")
+        return prefix, len(prefix)
+
+    fd_select = top[(12, 37)][0][0]
     fd_select_bytes = data[fd_select:fd_select + fd_select_length(data, fd_select, num_glyphs)]
     fd_dicts, _ = read_index(data, top[(12, 36)][0][0])
     private_bytes = []
@@ -469,7 +488,14 @@ def verify(source, font, outlines, glyph_sets, files, edges, cp_glyphs, chunks, 
         raise ValueError("CFF Top DICT differs after reassembly")
     if original_cff.fontNames != rebuilt_cff.fontNames or list(original_cff.strings.strings) != list(rebuilt_cff.strings.strings):
         raise ValueError("CFF names or strings differ after reassembly")
-    for original_fd, rebuilt_fd in zip(original_top.FDArray, rebuilt_top.FDArray, strict=True):
+    if hasattr(original_top, "FDArray"):
+        original_dicts, rebuilt_dicts = original_top.FDArray, rebuilt_top.FDArray
+        if [original_top.FDSelect[i] for i in range(len(original_top.CharStrings))] != [
+                rebuilt_top.FDSelect[i] for i in range(len(rebuilt_top.CharStrings))]:
+            raise ValueError("CFF FDSelect differs after reassembly")
+    else:
+        original_dicts, rebuilt_dicts = [original_top], [rebuilt_top]
+    for original_fd, rebuilt_fd in zip(original_dicts, rebuilt_dicts, strict=True):
         if {k: v for k, v in original_fd.rawDict.items() if k not in offsets} != {
                 k: v for k, v in rebuilt_fd.rawDict.items() if k not in offsets}:
             raise ValueError("CFF Font DICT differs after reassembly")
@@ -477,9 +503,6 @@ def verify(source, font, outlines, glyph_sets, files, edges, cp_glyphs, chunks, 
         rebuilt_private = {k: v for k, v in rebuilt_fd.Private.rawDict.items() if k not in offsets}
         if original_private != rebuilt_private:
             raise ValueError("CFF Private DICT differs after reassembly")
-    if [original_top.FDSelect[i] for i in range(len(original_top.CharStrings))] != [
-            rebuilt_top.FDSelect[i] for i in range(len(rebuilt_top.CharStrings))]:
-        raise ValueError("CFF FDSelect differs after reassembly")
     if original_top.charset != rebuilt_top.charset:
         raise ValueError("CFF charset differs after reassembly")
     included = set().union(*glyph_sets)

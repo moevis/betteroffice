@@ -1498,16 +1498,120 @@
     {
       "pack": "cjk",
       "family": "Noto Sans SC",
+      "weight": 100,
+      "style": "normal",
+      "file": "NotoSansSC-Thin.otf.zst",
+      "byteLength": 7574608,
+      "script": "cjk-sc",
+      "version": "0.5.0",
+      "codec": "zstd",
+      "dict": "NotoSansSC-Regular.otf.zst",
+      "encodedLength": 5385423
+    },
+    {
+      "pack": "cjk",
+      "family": "Noto Sans SC",
+      "weight": 300,
+      "style": "normal",
+      "file": "NotoSansSC-Light.otf.zst",
+      "byteLength": 8299104,
+      "script": "cjk-sc",
+      "version": "0.5.0",
+      "codec": "zstd",
+      "dict": "NotoSansSC-Regular.otf.zst",
+      "encodedLength": 6076000
+    },
+    {
+      "pack": "cjk",
+      "family": "Noto Sans SC",
+      "weight": 350,
+      "style": "normal",
+      "file": "NotoSansSC-DemiLight.otf.zst",
+      "byteLength": 8325948,
+      "script": "cjk-sc",
+      "version": "0.5.0",
+      "codec": "zstd",
+      "dict": "NotoSansSC-Regular.otf.zst",
+      "encodedLength": 6084296
+    },
+    {
+      "pack": "cjk",
+      "family": "Noto Sans SC",
       "metricCompatWith": "Microsoft YaHei",
       "weight": 400,
       "style": "normal",
       "file": "NotoSansSC-Regular.otf.zst",
       "byteLength": 8331336,
       "script": "cjk-sc",
-      "version": "0.4.2",
+      "version": "0.5.0",
       "codec": "zstd",
       "dict": null,
       "encodedLength": 6444964
+    },
+    {
+      "pack": "cjk",
+      "family": "Noto Sans SC",
+      "weight": 500,
+      "style": "normal",
+      "file": "NotoSansSC-Medium.otf.zst",
+      "byteLength": 8345436,
+      "script": "cjk-sc",
+      "version": "0.5.0",
+      "codec": "zstd",
+      "dict": "NotoSansSC-Regular.otf.zst",
+      "encodedLength": 6386076
+    },
+    {
+      "pack": "cjk",
+      "family": "Noto Sans SC",
+      "weight": 700,
+      "style": "normal",
+      "file": "NotoSansSC-Bold.otf.zst",
+      "byteLength": 8543168,
+      "script": "cjk-sc",
+      "version": "0.5.0",
+      "codec": "zstd",
+      "dict": "NotoSansSC-Regular.otf.zst",
+      "encodedLength": 6642831
+    },
+    {
+      "pack": "cjk",
+      "family": "Noto Sans SC",
+      "weight": 900,
+      "style": "normal",
+      "file": "NotoSansSC-Black.otf.zst",
+      "byteLength": 8855916,
+      "script": "cjk-sc",
+      "version": "0.5.0",
+      "codec": "zstd",
+      "dict": "NotoSansSC-Regular.otf.zst",
+      "encodedLength": 6775375
+    },
+    {
+      "pack": "cjk",
+      "family": "Noto Serif SC",
+      "weight": 200,
+      "style": "normal",
+      "file": "NotoSerifSC-ExtraLight.otf.zst",
+      "byteLength": 10443960,
+      "script": "cjk-sc",
+      "version": "0.5.0",
+      "codec": "zstd",
+      "dict": "NotoSerifSC-Regular.otf.zst",
+      "encodedLength": 7460362
+    },
+    {
+      "pack": "cjk",
+      "family": "Noto Serif SC",
+      "weight": 300,
+      "style": "normal",
+      "file": "NotoSerifSC-Light.otf.zst",
+      "byteLength": 11495092,
+      "script": "cjk-sc",
+      "version": "0.5.0",
+      "codec": "zstd",
+      "dict": "NotoSerifSC-Regular.otf.zst",
+      "encodedLength": 8295692
     },
     {
       "pack": "cjk",
@@ -1518,10 +1622,101 @@
       "file": "NotoSerifSC-Regular.otf.zst",
       "byteLength": 11625800,
       "script": "cjk-sc",
-      "version": "0.4.2",
+      "version": "0.5.0",
       "codec": "zstd",
       "dict": null,
       "encodedLength": 8743526
+    },
+    {
+      "pack": "cjk",
+      "family": "Noto Serif SC",
+      "weight": 500,
+      "style": "normal",
+      "file": "NotoSerifSC-Medium.otf.zst",
+      "byteLength": 11734356,
+      "script": "cjk-sc",
+      "version": "0.5.0",
+      "codec": "zstd",
+      "dict": "NotoSerifSC-Regular.otf.zst",
+      "encodedLength": 8667533
+    },
+    {
+      "pack": "cjk",
+      "family": "Noto Serif SC",
+      "weight": 600,
+      "style": "normal",
+      "file": "NotoSerifSC-SemiBold.otf.zst",
+      "byteLength": 11771476,
+      "script": "cjk-sc",
+      "version": "0.5.0",
+      "codec": "zstd",
+      "dict": "NotoSerifSC-Regular.otf.zst",
+      "encodedLength": 8817408
+    },
+    {
+      "pack": "cjk",
+      "family": "Noto Serif SC",
+      "weight": 700,
+      "style": "normal",
+      "file": "NotoSerifSC-Bold.otf.zst",
+      "byteLength": 12094336,
+      "script": "cjk-sc",
+      "version": "0.5.0",
+      "codec": "zstd",
+      "dict": "NotoSerifSC-Regular.otf.zst",
+      "encodedLength": 9182150
+    },
+    {
+      "pack": "cjk",
+      "family": "Noto Serif SC",
+      "weight": 900,
+      "style": "normal",
+      "file": "NotoSerifSC-Black.otf.zst",
+      "byteLength": 11862600,
+      "script": "cjk-sc",
+      "version": "0.5.0",
+      "codec": "zstd",
+      "dict": "NotoSerifSC-Regular.otf.zst",
+      "encodedLength": 8888605
+    },
+    {
+      "pack": "cjk",
+      "family": "Noto Sans TC",
+      "weight": 100,
+      "style": "normal",
+      "file": "NotoSansTC-Thin.otf.zst",
+      "byteLength": 5215632,
+      "script": "cjk-tc",
+      "version": "0.5.0",
+      "codec": "zstd",
+      "dict": "NotoSansTC-Regular.otf.zst",
+      "encodedLength": 3759142
+    },
+    {
+      "pack": "cjk",
+      "family": "Noto Sans TC",
+      "weight": 300,
+      "style": "normal",
+      "file": "NotoSansTC-Light.otf.zst",
+      "byteLength": 5661684,
+      "script": "cjk-tc",
+      "version": "0.5.0",
+      "codec": "zstd",
+      "dict": "NotoSansTC-Regular.otf.zst",
+      "encodedLength": 4175818
+    },
+    {
+      "pack": "cjk",
+      "family": "Noto Sans TC",
+      "weight": 350,
+      "style": "normal",
+      "file": "NotoSansTC-DemiLight.otf.zst",
+      "byteLength": 5679024,
+      "script": "cjk-tc",
+      "version": "0.5.0",
+      "codec": "zstd",
+      "dict": "NotoSansTC-Regular.otf.zst",
+      "encodedLength": 4147656
     },
     {
       "pack": "cjk",
@@ -1532,10 +1727,180 @@
       "file": "NotoSansTC-Regular.otf.zst",
       "byteLength": 5683368,
       "script": "cjk-tc",
-      "version": "0.4.2",
+      "version": "0.5.0",
       "codec": "zstd",
       "dict": null,
       "encodedLength": 4456580
+    },
+    {
+      "pack": "cjk",
+      "family": "Noto Sans TC",
+      "weight": 500,
+      "style": "normal",
+      "file": "NotoSansTC-Medium.otf.zst",
+      "byteLength": 5695744,
+      "script": "cjk-tc",
+      "version": "0.5.0",
+      "codec": "zstd",
+      "dict": "NotoSansTC-Regular.otf.zst",
+      "encodedLength": 4358097
+    },
+    {
+      "pack": "cjk",
+      "family": "Noto Sans TC",
+      "weight": 700,
+      "style": "normal",
+      "file": "NotoSansTC-Bold.otf.zst",
+      "byteLength": 5839972,
+      "script": "cjk-tc",
+      "version": "0.5.0",
+      "codec": "zstd",
+      "dict": "NotoSansTC-Regular.otf.zst",
+      "encodedLength": 4541408
+    },
+    {
+      "pack": "cjk",
+      "family": "Noto Sans TC",
+      "weight": 900,
+      "style": "normal",
+      "file": "NotoSansTC-Black.otf.zst",
+      "byteLength": 6068384,
+      "script": "cjk-tc",
+      "version": "0.5.0",
+      "codec": "zstd",
+      "dict": "NotoSansTC-Regular.otf.zst",
+      "encodedLength": 4658828
+    },
+    {
+      "pack": "cjk",
+      "family": "Noto Serif TC",
+      "weight": 200,
+      "style": "normal",
+      "file": "NotoSerifTC-ExtraLight.otf.zst",
+      "byteLength": 7175116,
+      "script": "cjk-tc",
+      "version": "0.5.0",
+      "codec": "zstd",
+      "dict": "NotoSerifTC-Regular.otf.zst",
+      "encodedLength": 5185288
+    },
+    {
+      "pack": "cjk",
+      "family": "Noto Serif TC",
+      "weight": 300,
+      "style": "normal",
+      "file": "NotoSerifTC-Light.otf.zst",
+      "byteLength": 7841712,
+      "script": "cjk-tc",
+      "version": "0.5.0",
+      "codec": "zstd",
+      "dict": "NotoSerifTC-Regular.otf.zst",
+      "encodedLength": 5683785
+    },
+    {
+      "pack": "cjk",
+      "family": "Noto Serif TC",
+      "metricCompatWith": "PMingLiU",
+      "weight": 400,
+      "style": "normal",
+      "file": "NotoSerifTC-Regular.otf.zst",
+      "byteLength": 7936104,
+      "script": "cjk-tc",
+      "version": "0.5.0",
+      "codec": "zstd",
+      "dict": null,
+      "encodedLength": 6087666
+    },
+    {
+      "pack": "cjk",
+      "family": "Noto Serif TC",
+      "weight": 500,
+      "style": "normal",
+      "file": "NotoSerifTC-Medium.otf.zst",
+      "byteLength": 8011272,
+      "script": "cjk-tc",
+      "version": "0.5.0",
+      "codec": "zstd",
+      "dict": "NotoSerifTC-Regular.otf.zst",
+      "encodedLength": 5937405
+    },
+    {
+      "pack": "cjk",
+      "family": "Noto Serif TC",
+      "weight": 600,
+      "style": "normal",
+      "file": "NotoSerifTC-SemiBold.otf.zst",
+      "byteLength": 8045844,
+      "script": "cjk-tc",
+      "version": "0.5.0",
+      "codec": "zstd",
+      "dict": "NotoSerifTC-Regular.otf.zst",
+      "encodedLength": 6061618
+    },
+    {
+      "pack": "cjk",
+      "family": "Noto Serif TC",
+      "weight": 700,
+      "style": "normal",
+      "file": "NotoSerifTC-Bold.otf.zst",
+      "byteLength": 8253304,
+      "script": "cjk-tc",
+      "version": "0.5.0",
+      "codec": "zstd",
+      "dict": "NotoSerifTC-Regular.otf.zst",
+      "encodedLength": 6303851
+    },
+    {
+      "pack": "cjk",
+      "family": "Noto Serif TC",
+      "weight": 900,
+      "style": "normal",
+      "file": "NotoSerifTC-Black.otf.zst",
+      "byteLength": 8122092,
+      "script": "cjk-tc",
+      "version": "0.5.0",
+      "codec": "zstd",
+      "dict": "NotoSerifTC-Regular.otf.zst",
+      "encodedLength": 6176094
+    },
+    {
+      "pack": "cjk",
+      "family": "Noto Sans JP",
+      "weight": 100,
+      "style": "normal",
+      "file": "NotoSansJP-Thin.otf.zst",
+      "byteLength": 4234984,
+      "script": "cjk-jp",
+      "version": "0.5.0",
+      "codec": "zstd",
+      "dict": "NotoSansJP-Regular.otf.zst",
+      "encodedLength": 3055361
+    },
+    {
+      "pack": "cjk",
+      "family": "Noto Sans JP",
+      "weight": 300,
+      "style": "normal",
+      "file": "NotoSansJP-Light.otf.zst",
+      "byteLength": 4513968,
+      "script": "cjk-jp",
+      "version": "0.5.0",
+      "codec": "zstd",
+      "dict": "NotoSansJP-Regular.otf.zst",
+      "encodedLength": 3336806
+    },
+    {
+      "pack": "cjk",
+      "family": "Noto Sans JP",
+      "weight": 350,
+      "style": "normal",
+      "file": "NotoSansJP-DemiLight.otf.zst",
+      "byteLength": 4529440,
+      "script": "cjk-jp",
+      "version": "0.5.0",
+      "codec": "zstd",
+      "dict": "NotoSansJP-Regular.otf.zst",
+      "encodedLength": 3315684
     },
     {
       "pack": "cjk",
@@ -1546,10 +1911,180 @@
       "file": "NotoSansJP-Regular.otf.zst",
       "byteLength": 4533028,
       "script": "cjk-jp",
-      "version": "0.4.2",
+      "version": "0.5.0",
       "codec": "zstd",
       "dict": null,
       "encodedLength": 3595531
+    },
+    {
+      "pack": "cjk",
+      "family": "Noto Sans JP",
+      "weight": 500,
+      "style": "normal",
+      "file": "NotoSansJP-Medium.otf.zst",
+      "byteLength": 4549132,
+      "script": "cjk-jp",
+      "version": "0.5.0",
+      "codec": "zstd",
+      "dict": "NotoSansJP-Regular.otf.zst",
+      "encodedLength": 3476263
+    },
+    {
+      "pack": "cjk",
+      "family": "Noto Sans JP",
+      "weight": 700,
+      "style": "normal",
+      "file": "NotoSansJP-Bold.otf.zst",
+      "byteLength": 4656448,
+      "script": "cjk-jp",
+      "version": "0.5.0",
+      "codec": "zstd",
+      "dict": "NotoSansJP-Regular.otf.zst",
+      "encodedLength": 3593858
+    },
+    {
+      "pack": "cjk",
+      "family": "Noto Sans JP",
+      "weight": 900,
+      "style": "normal",
+      "file": "NotoSansJP-Black.otf.zst",
+      "byteLength": 4855212,
+      "script": "cjk-jp",
+      "version": "0.5.0",
+      "codec": "zstd",
+      "dict": "NotoSansJP-Regular.otf.zst",
+      "encodedLength": 3679748
+    },
+    {
+      "pack": "cjk",
+      "family": "Noto Serif JP",
+      "weight": 200,
+      "style": "normal",
+      "file": "NotoSerifJP-ExtraLight.otf.zst",
+      "byteLength": 5672256,
+      "script": "cjk-jp",
+      "version": "0.5.0",
+      "codec": "zstd",
+      "dict": "NotoSerifJP-Regular.otf.zst",
+      "encodedLength": 4059928
+    },
+    {
+      "pack": "cjk",
+      "family": "Noto Serif JP",
+      "weight": 300,
+      "style": "normal",
+      "file": "NotoSerifJP-Light.otf.zst",
+      "byteLength": 6172864,
+      "script": "cjk-jp",
+      "version": "0.5.0",
+      "codec": "zstd",
+      "dict": "NotoSerifJP-Regular.otf.zst",
+      "encodedLength": 4406200
+    },
+    {
+      "pack": "cjk",
+      "family": "Noto Serif JP",
+      "metricCompatWith": "MS Mincho",
+      "weight": 400,
+      "style": "normal",
+      "file": "NotoSerifJP-Regular.otf.zst",
+      "byteLength": 6210492,
+      "script": "cjk-jp",
+      "version": "0.5.0",
+      "codec": "zstd",
+      "dict": null,
+      "encodedLength": 4742997
+    },
+    {
+      "pack": "cjk",
+      "family": "Noto Serif JP",
+      "weight": 500,
+      "style": "normal",
+      "file": "NotoSerifJP-Medium.otf.zst",
+      "byteLength": 6279496,
+      "script": "cjk-jp",
+      "version": "0.5.0",
+      "codec": "zstd",
+      "dict": "NotoSerifJP-Regular.otf.zst",
+      "encodedLength": 4581148
+    },
+    {
+      "pack": "cjk",
+      "family": "Noto Serif JP",
+      "weight": 600,
+      "style": "normal",
+      "file": "NotoSerifJP-SemiBold.otf.zst",
+      "byteLength": 6308040,
+      "script": "cjk-jp",
+      "version": "0.5.0",
+      "codec": "zstd",
+      "dict": "NotoSerifJP-Regular.otf.zst",
+      "encodedLength": 4679119
+    },
+    {
+      "pack": "cjk",
+      "family": "Noto Serif JP",
+      "weight": 700,
+      "style": "normal",
+      "file": "NotoSerifJP-Bold.otf.zst",
+      "byteLength": 6479172,
+      "script": "cjk-jp",
+      "version": "0.5.0",
+      "codec": "zstd",
+      "dict": "NotoSerifJP-Regular.otf.zst",
+      "encodedLength": 4861128
+    },
+    {
+      "pack": "cjk",
+      "family": "Noto Serif JP",
+      "weight": 900,
+      "style": "normal",
+      "file": "NotoSerifJP-Black.otf.zst",
+      "byteLength": 6329688,
+      "script": "cjk-jp",
+      "version": "0.5.0",
+      "codec": "zstd",
+      "dict": "NotoSerifJP-Regular.otf.zst",
+      "encodedLength": 4739626
+    },
+    {
+      "pack": "cjk",
+      "family": "Noto Sans KR",
+      "weight": 100,
+      "style": "normal",
+      "file": "NotoSansKR-Thin.otf.zst",
+      "byteLength": 4254020,
+      "script": "cjk-kr",
+      "version": "0.5.0",
+      "codec": "zstd",
+      "dict": "NotoSansKR-Regular.otf.zst",
+      "encodedLength": 2862691
+    },
+    {
+      "pack": "cjk",
+      "family": "Noto Sans KR",
+      "weight": 300,
+      "style": "normal",
+      "file": "NotoSansKR-Light.otf.zst",
+      "byteLength": 4629056,
+      "script": "cjk-kr",
+      "version": "0.5.0",
+      "codec": "zstd",
+      "dict": "NotoSansKR-Regular.otf.zst",
+      "encodedLength": 3194411
+    },
+    {
+      "pack": "cjk",
+      "family": "Noto Sans KR",
+      "weight": 350,
+      "style": "normal",
+      "file": "NotoSansKR-DemiLight.otf.zst",
+      "byteLength": 4651712,
+      "script": "cjk-kr",
+      "version": "0.5.0",
+      "codec": "zstd",
+      "dict": "NotoSansKR-Regular.otf.zst",
+      "encodedLength": 3199179
     },
     {
       "pack": "cjk",
@@ -1560,10 +2095,155 @@
       "file": "NotoSansKR-Regular.otf.zst",
       "byteLength": 4644748,
       "script": "cjk-kr",
-      "version": "0.4.2",
+      "version": "0.5.0",
       "codec": "zstd",
       "dict": null,
       "encodedLength": 3420953
+    },
+    {
+      "pack": "cjk",
+      "family": "Noto Sans KR",
+      "weight": 500,
+      "style": "normal",
+      "file": "NotoSansKR-Medium.otf.zst",
+      "byteLength": 4669816,
+      "script": "cjk-kr",
+      "version": "0.5.0",
+      "codec": "zstd",
+      "dict": "NotoSansKR-Regular.otf.zst",
+      "encodedLength": 3342592
+    },
+    {
+      "pack": "cjk",
+      "family": "Noto Sans KR",
+      "weight": 700,
+      "style": "normal",
+      "file": "NotoSansKR-Bold.otf.zst",
+      "byteLength": 4816044,
+      "script": "cjk-kr",
+      "version": "0.5.0",
+      "codec": "zstd",
+      "dict": "NotoSansKR-Regular.otf.zst",
+      "encodedLength": 3463945
+    },
+    {
+      "pack": "cjk",
+      "family": "Noto Sans KR",
+      "weight": 900,
+      "style": "normal",
+      "file": "NotoSansKR-Black.otf.zst",
+      "byteLength": 5033248,
+      "script": "cjk-kr",
+      "version": "0.5.0",
+      "codec": "zstd",
+      "dict": "NotoSansKR-Regular.otf.zst",
+      "encodedLength": 3543309
+    },
+    {
+      "pack": "cjk",
+      "family": "Noto Serif KR",
+      "weight": 200,
+      "style": "normal",
+      "file": "NotoSerifKR-ExtraLight.otf.zst",
+      "byteLength": 6133864,
+      "script": "cjk-kr",
+      "version": "0.5.0",
+      "codec": "zstd",
+      "dict": "NotoSerifKR-Regular.otf.zst",
+      "encodedLength": 3929651
+    },
+    {
+      "pack": "cjk",
+      "family": "Noto Serif KR",
+      "weight": 300,
+      "style": "normal",
+      "file": "NotoSerifKR-Light.otf.zst",
+      "byteLength": 7838800,
+      "script": "cjk-kr",
+      "version": "0.5.0",
+      "codec": "zstd",
+      "dict": "NotoSerifKR-Regular.otf.zst",
+      "encodedLength": 4806391
+    },
+    {
+      "pack": "cjk",
+      "family": "Noto Serif KR",
+      "metricCompatWith": "Batang",
+      "weight": 400,
+      "style": "normal",
+      "file": "NotoSerifKR-Regular.otf.zst",
+      "byteLength": 7669020,
+      "script": "cjk-kr",
+      "version": "0.5.0",
+      "codec": "zstd",
+      "dict": null,
+      "encodedLength": 5010363
+    },
+    {
+      "pack": "cjk",
+      "family": "Noto Serif KR",
+      "weight": 500,
+      "style": "normal",
+      "file": "NotoSerifKR-Medium.otf.zst",
+      "byteLength": 7769336,
+      "script": "cjk-kr",
+      "version": "0.5.0",
+      "codec": "zstd",
+      "dict": "NotoSerifKR-Regular.otf.zst",
+      "encodedLength": 4917137
+    },
+    {
+      "pack": "cjk",
+      "family": "Noto Serif KR",
+      "weight": 600,
+      "style": "normal",
+      "file": "NotoSerifKR-SemiBold.otf.zst",
+      "byteLength": 7610748,
+      "script": "cjk-kr",
+      "version": "0.5.0",
+      "codec": "zstd",
+      "dict": "NotoSerifKR-Regular.otf.zst",
+      "encodedLength": 4918833
+    },
+    {
+      "pack": "cjk",
+      "family": "Noto Serif KR",
+      "weight": 700,
+      "style": "normal",
+      "file": "NotoSerifKR-Bold.otf.zst",
+      "byteLength": 7910236,
+      "script": "cjk-kr",
+      "version": "0.5.0",
+      "codec": "zstd",
+      "dict": "NotoSerifKR-Regular.otf.zst",
+      "encodedLength": 5129383
+    },
+    {
+      "pack": "cjk",
+      "family": "Noto Serif KR",
+      "weight": 900,
+      "style": "normal",
+      "file": "NotoSerifKR-Black.otf.zst",
+      "byteLength": 6648912,
+      "script": "cjk-kr",
+      "version": "0.5.0",
+      "codec": "zstd",
+      "dict": "NotoSerifKR-Regular.otf.zst",
+      "encodedLength": 4436840
+    },
+    {
+      "pack": "cjk",
+      "family": "Northstar Kai",
+      "metricCompatWith": "KaiTi",
+      "weight": 400,
+      "style": "normal",
+      "file": "NorthstarKai-Regular.otf.zst",
+      "byteLength": 21030952,
+      "script": "cjk-sc",
+      "version": "0.5.0",
+      "codec": "zstd",
+      "dict": null,
+      "encodedLength": 11933216
     }
   ],
   "wordFamilyAliases": {
@@ -1597,16 +2277,16 @@
     "等线": "microsoft yahei",
     "nsimsun": "simsun",
     "fangsong": "simsun",
-    "kaiti": "simsun",
+    "kaiti": "kaiti",
     "宋体": "simsun",
     "仿宋": "simsun",
-    "楷体": "simsun",
+    "楷体": "kaiti",
     "微軟正黑體": "microsoft jhenghei",
-    "pmingliu": "microsoft jhenghei",
-    "mingliu": "microsoft jhenghei",
+    "pmingliu": "pmingliu",
+    "mingliu": "pmingliu",
     "dfkai-sb": "microsoft jhenghei",
-    "新細明體": "microsoft jhenghei",
-    "細明體": "microsoft jhenghei",
+    "新細明體": "pmingliu",
+    "細明體": "pmingliu",
     "標楷體": "microsoft jhenghei",
     "ms pgothic": "ms gothic",
     "ms ui gothic": "ms gothic",
@@ -1616,345 +2296,26 @@
     "ｍｓ ｐゴシック": "ms gothic",
     "メイリオ": "ms gothic",
     "游ゴシック": "ms gothic",
-    "ms mincho": "ms gothic",
-    "ms pmincho": "ms gothic",
-    "yu mincho": "ms gothic",
-    "ｍｓ 明朝": "ms gothic",
-    "ｍｓ ｐ明朝": "ms gothic",
-    "游明朝": "ms gothic",
+    "ms mincho": "ms mincho",
+    "ms pmincho": "ms mincho",
+    "yu mincho": "ms mincho",
+    "ｍｓ 明朝": "ms mincho",
+    "ｍｓ ｐ明朝": "ms mincho",
+    "游明朝": "ms mincho",
     "맑은 고딕": "malgun gothic",
     "gulim": "malgun gothic",
     "dotum": "malgun gothic",
-    "batang": "malgun gothic",
-    "gungsuh": "malgun gothic",
+    "batang": "batang",
+    "gungsuh": "batang",
     "굴림": "malgun gothic",
     "돋움": "malgun gothic",
     "바탕": "malgun gothic",
-    "궁서": "malgun gothic"
+    "궁서": "malgun gothic",
+    "kaiti_gb2312": "kaiti",
+    "kaiti gb2312": "kaiti",
+    "kaiti-gb2312": "kaiti"
   },
-  "wordFamilySubstitutes": {
-    "arial": {
-      "remote": "Arimo",
-      "generic": "sans-serif"
-    },
-    "helvetica": {
-      "remote": "Arimo",
-      "generic": "sans-serif"
-    },
-    "helvetica neue": {
-      "remote": "Arimo",
-      "generic": "sans-serif"
-    },
-    "arial narrow": {
-      "remote": "Archivo Narrow",
-      "generic": "sans-serif"
-    },
-    "arial black": {
-      "remote": "Archivo Black",
-      "generic": "sans-serif"
-    },
-    "calibri": {
-      "remote": "Carlito",
-      "generic": "sans-serif"
-    },
-    "calibri light": {
-      "remote": "Carlito",
-      "generic": "sans-serif"
-    },
-    "cambria": {
-      "remote": "Caladea",
-      "generic": "serif"
-    },
-    "times new roman": {
-      "remote": "Tinos",
-      "generic": "serif"
-    },
-    "times": {
-      "remote": "Tinos",
-      "generic": "serif"
-    },
-    "courier new": {
-      "remote": "Cousine",
-      "generic": "monospace"
-    },
-    "courier": {
-      "remote": "Cousine",
-      "generic": "monospace"
-    },
-    "georgia": {
-      "remote": "Gelasio",
-      "generic": "serif"
-    },
-    "comic sans ms": {
-      "remote": "Comic Neue",
-      "generic": "cursive"
-    },
-    "verdana": {
-      "remote": "Open Sans",
-      "generic": "sans-serif"
-    },
-    "tahoma": {
-      "remote": "Open Sans",
-      "generic": "sans-serif"
-    },
-    "segoe ui": {
-      "remote": "Open Sans",
-      "generic": "sans-serif"
-    },
-    "lucida sans": {
-      "remote": "Open Sans",
-      "generic": "sans-serif"
-    },
-    "lucida sans unicode": {
-      "remote": "Open Sans",
-      "generic": "sans-serif"
-    },
-    "lucida grande": {
-      "remote": "Open Sans",
-      "generic": "sans-serif"
-    },
-    "trebuchet ms": {
-      "remote": "Fira Sans",
-      "generic": "sans-serif"
-    },
-    "franklin gothic": {
-      "remote": "Libre Franklin",
-      "generic": "sans-serif"
-    },
-    "franklin gothic book": {
-      "remote": "Libre Franklin",
-      "generic": "sans-serif"
-    },
-    "franklin gothic medium": {
-      "remote": "Libre Franklin",
-      "generic": "sans-serif"
-    },
-    "century gothic": {
-      "remote": "Questrial",
-      "generic": "sans-serif"
-    },
-    "impact": {
-      "remote": "Anton",
-      "generic": "sans-serif"
-    },
-    "garamond": {
-      "remote": "EB Garamond",
-      "generic": "serif"
-    },
-    "palatino linotype": {
-      "remote": "EB Garamond",
-      "generic": "serif"
-    },
-    "palatino": {
-      "remote": "EB Garamond",
-      "generic": "serif"
-    },
-    "book antiqua": {
-      "remote": "EB Garamond",
-      "generic": "serif"
-    },
-    "consolas": {
-      "remote": "Inconsolata",
-      "generic": "monospace"
-    },
-    "lucida console": {
-      "remote": "Inconsolata",
-      "generic": "monospace"
-    },
-    "monaco": {
-      "remote": "Fira Mono",
-      "generic": "monospace"
-    },
-    "ms mincho": {
-      "remote": "Noto Serif JP",
-      "generic": "serif"
-    },
-    "ms pmincho": {
-      "remote": "Noto Serif JP",
-      "generic": "serif"
-    },
-    "ｍｓ 明朝": {
-      "remote": "Noto Serif JP",
-      "generic": "serif"
-    },
-    "ｍｓ ｐ明朝": {
-      "remote": "Noto Serif JP",
-      "generic": "serif"
-    },
-    "yu mincho": {
-      "remote": "Noto Serif JP",
-      "generic": "serif"
-    },
-    "游明朝": {
-      "remote": "Noto Serif JP",
-      "generic": "serif"
-    },
-    "ms gothic": {
-      "remote": "Noto Sans JP",
-      "generic": "sans-serif"
-    },
-    "ms pgothic": {
-      "remote": "Noto Sans JP",
-      "generic": "sans-serif"
-    },
-    "ms ui gothic": {
-      "remote": "Noto Sans JP",
-      "generic": "sans-serif"
-    },
-    "ｍｓ ゴシック": {
-      "remote": "Noto Sans JP",
-      "generic": "sans-serif"
-    },
-    "ｍｓ ｐゴシック": {
-      "remote": "Noto Sans JP",
-      "generic": "sans-serif"
-    },
-    "meiryo": {
-      "remote": "Noto Sans JP",
-      "generic": "sans-serif"
-    },
-    "メイリオ": {
-      "remote": "Noto Sans JP",
-      "generic": "sans-serif"
-    },
-    "yu gothic": {
-      "remote": "Noto Sans JP",
-      "generic": "sans-serif"
-    },
-    "游ゴシック": {
-      "remote": "Noto Sans JP",
-      "generic": "sans-serif"
-    },
-    "simsun": {
-      "remote": "Noto Serif SC",
-      "generic": "serif"
-    },
-    "nsimsun": {
-      "remote": "Noto Serif SC",
-      "generic": "serif"
-    },
-    "宋体": {
-      "remote": "Noto Serif SC",
-      "generic": "serif"
-    },
-    "fangsong": {
-      "remote": "Noto Serif SC",
-      "generic": "serif"
-    },
-    "仿宋": {
-      "remote": "Noto Serif SC",
-      "generic": "serif"
-    },
-    "kaiti": {
-      "remote": "Noto Serif SC",
-      "generic": "serif"
-    },
-    "楷体": {
-      "remote": "Noto Serif SC",
-      "generic": "serif"
-    },
-    "simhei": {
-      "remote": "Noto Sans SC",
-      "generic": "sans-serif"
-    },
-    "黑体": {
-      "remote": "Noto Sans SC",
-      "generic": "sans-serif"
-    },
-    "microsoft yahei": {
-      "remote": "Noto Sans SC",
-      "generic": "sans-serif"
-    },
-    "微软雅黑": {
-      "remote": "Noto Sans SC",
-      "generic": "sans-serif"
-    },
-    "dengxian": {
-      "remote": "Noto Sans SC",
-      "generic": "sans-serif"
-    },
-    "等线": {
-      "remote": "Noto Sans SC",
-      "generic": "sans-serif"
-    },
-    "pmingliu": {
-      "remote": "Noto Serif TC",
-      "generic": "serif"
-    },
-    "mingliu": {
-      "remote": "Noto Serif TC",
-      "generic": "serif"
-    },
-    "新細明體": {
-      "remote": "Noto Serif TC",
-      "generic": "serif"
-    },
-    "細明體": {
-      "remote": "Noto Serif TC",
-      "generic": "serif"
-    },
-    "dfkai-sb": {
-      "remote": "Noto Serif TC",
-      "generic": "serif"
-    },
-    "標楷體": {
-      "remote": "Noto Serif TC",
-      "generic": "serif"
-    },
-    "microsoft jhenghei": {
-      "remote": "Noto Sans TC",
-      "generic": "sans-serif"
-    },
-    "微軟正黑體": {
-      "remote": "Noto Sans TC",
-      "generic": "sans-serif"
-    },
-    "malgun gothic": {
-      "remote": "Noto Sans KR",
-      "generic": "sans-serif"
-    },
-    "맑은 고딕": {
-      "remote": "Noto Sans KR",
-      "generic": "sans-serif"
-    },
-    "gulim": {
-      "remote": "Noto Sans KR",
-      "generic": "sans-serif"
-    },
-    "굴림": {
-      "remote": "Noto Sans KR",
-      "generic": "sans-serif"
-    },
-    "dotum": {
-      "remote": "Noto Sans KR",
-      "generic": "sans-serif"
-    },
-    "돋움": {
-      "remote": "Noto Sans KR",
-      "generic": "sans-serif"
-    },
-    "batang": {
-      "remote": "Noto Serif KR",
-      "generic": "serif"
-    },
-    "바탕": {
-      "remote": "Noto Serif KR",
-      "generic": "serif"
-    },
-    "gungsuh": {
-      "remote": "Noto Serif KR",
-      "generic": "serif"
-    },
-    "궁서": {
-      "remote": "Noto Serif KR",
-      "generic": "serif"
-    }
-  },
-  "unvendoredNotoSerif": {
-    "noto serif tc": "Noto Sans TC",
-    "noto serif jp": "Noto Sans JP",
-    "noto serif kr": "Noto Sans KR"
-  },
+  "unvendoredNotoSerif": {},
   "lighterThanRegular": [
     "thin",
     "hairline",
@@ -2131,17 +2492,69 @@
       "NotoSansTifinagh-Regular.ttf.zst"
     ],
     "cjk-sc": [
+      "NotoSansSC-Thin.otf.zst",
+      "NotoSansSC-Light.otf.zst",
+      "NotoSansSC-DemiLight.otf.zst",
       "NotoSansSC-Regular.otf.zst",
-      "NotoSerifSC-Regular.otf.zst"
+      "NotoSansSC-Medium.otf.zst",
+      "NotoSansSC-Bold.otf.zst",
+      "NotoSansSC-Black.otf.zst",
+      "NotoSerifSC-ExtraLight.otf.zst",
+      "NotoSerifSC-Light.otf.zst",
+      "NotoSerifSC-Regular.otf.zst",
+      "NotoSerifSC-Medium.otf.zst",
+      "NotoSerifSC-SemiBold.otf.zst",
+      "NotoSerifSC-Bold.otf.zst",
+      "NotoSerifSC-Black.otf.zst",
+      "NorthstarKai-Regular.otf.zst"
     ],
     "cjk-tc": [
-      "NotoSansTC-Regular.otf.zst"
+      "NotoSansTC-Thin.otf.zst",
+      "NotoSansTC-Light.otf.zst",
+      "NotoSansTC-DemiLight.otf.zst",
+      "NotoSansTC-Regular.otf.zst",
+      "NotoSansTC-Medium.otf.zst",
+      "NotoSansTC-Bold.otf.zst",
+      "NotoSansTC-Black.otf.zst",
+      "NotoSerifTC-ExtraLight.otf.zst",
+      "NotoSerifTC-Light.otf.zst",
+      "NotoSerifTC-Regular.otf.zst",
+      "NotoSerifTC-Medium.otf.zst",
+      "NotoSerifTC-SemiBold.otf.zst",
+      "NotoSerifTC-Bold.otf.zst",
+      "NotoSerifTC-Black.otf.zst"
     ],
     "cjk-jp": [
-      "NotoSansJP-Regular.otf.zst"
+      "NotoSansJP-Thin.otf.zst",
+      "NotoSansJP-Light.otf.zst",
+      "NotoSansJP-DemiLight.otf.zst",
+      "NotoSansJP-Regular.otf.zst",
+      "NotoSansJP-Medium.otf.zst",
+      "NotoSansJP-Bold.otf.zst",
+      "NotoSansJP-Black.otf.zst",
+      "NotoSerifJP-ExtraLight.otf.zst",
+      "NotoSerifJP-Light.otf.zst",
+      "NotoSerifJP-Regular.otf.zst",
+      "NotoSerifJP-Medium.otf.zst",
+      "NotoSerifJP-SemiBold.otf.zst",
+      "NotoSerifJP-Bold.otf.zst",
+      "NotoSerifJP-Black.otf.zst"
     ],
     "cjk-kr": [
-      "NotoSansKR-Regular.otf.zst"
+      "NotoSansKR-Thin.otf.zst",
+      "NotoSansKR-Light.otf.zst",
+      "NotoSansKR-DemiLight.otf.zst",
+      "NotoSansKR-Regular.otf.zst",
+      "NotoSansKR-Medium.otf.zst",
+      "NotoSansKR-Bold.otf.zst",
+      "NotoSansKR-Black.otf.zst",
+      "NotoSerifKR-ExtraLight.otf.zst",
+      "NotoSerifKR-Light.otf.zst",
+      "NotoSerifKR-Regular.otf.zst",
+      "NotoSerifKR-Medium.otf.zst",
+      "NotoSerifKR-SemiBold.otf.zst",
+      "NotoSerifKR-Bold.otf.zst",
+      "NotoSerifKR-Black.otf.zst"
     ]
   },
   "requestedFamilyScriptFallback": {

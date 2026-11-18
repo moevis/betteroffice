@@ -1,3 +1,5 @@
+import { fontCdnConfiguration, fontCdnDecoderUrl } from './fontCdn';
+
 export type FontDecoder = (
   bytes: ArrayBuffer | Uint8Array,
   options: { codec: string; dict?: ArrayBuffer | Uint8Array; maxOutput?: number },
@@ -201,14 +203,17 @@ function bundledDecoderUrl(): URL | undefined {
 }
 
 async function loadDecoder(configured: URL | undefined): Promise<DecoderInstance> {
+  const configuration = fontCdnConfiguration();
+  const cdnUrl = configuration.baseUrl === false ? undefined : fontCdnDecoderUrl(configuration.baseUrl);
+  const cdnOnly = configured !== undefined && configured.href === cdnUrl?.href;
   const urls: URL[] = [];
-  for (const url of [configured, bundledDecoderUrl()]) {
+  for (const url of cdnOnly ? [configured] : [configured, bundledDecoderUrl()]) {
     if (url !== undefined && !urls.some((other) => other.href === url.href)) urls.push(url);
   }
   const misses: string[] = [];
   let cause: unknown;
   for (const url of urls) {
-    const missing = missingDecoders.get(url.href);
+    const missing = cdnOnly ? undefined : missingDecoders.get(url.href);
     if (missing !== undefined) {
       misses.push(`${url.href} (${missing})`);
       continue;
@@ -220,7 +225,7 @@ async function loadDecoder(configured: URL | undefined): Promise<DecoderInstance
     } catch (error) {
       const reason = missingDecoder(error);
       if (reason === undefined) throw error;
-      missingDecoders.set(url.href, reason);
+      if (!cdnOnly) missingDecoders.set(url.href, reason);
       misses.push(`${url.href} (${reason})`);
       cause = error;
     }

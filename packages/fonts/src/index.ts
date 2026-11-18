@@ -1,5 +1,5 @@
 export { configureFontCdn, fontCdnConfiguration, type FontCdnOptions, type FontCdnConfiguration } from './fontCdn';
-import { fontCdnConfiguration, fontCdnAssetUrl } from './fontCdn';
+import { fontCdnConfiguration, fontCdnAssetUrl, fontCdnDecoderUrl } from './fontCdn';
 export * from './manifest';
 export type { FontDecoder } from './decode';
 import type { FontDecoder } from './decode';
@@ -188,10 +188,10 @@ const cdnTimeouts = new WeakMap<URL, number>();
 
 function cdnAssetUrl(face: BundledFontFace, file = face.file, configuration = fontCdnConfiguration()): URL | undefined {
   const { baseUrl, timeoutMs } = configuration;
-  if (baseUrl === false || isBaseLatinFont(face.file)) return undefined;
+  if (baseUrl === false) return undefined;
   const pack = packFor(face);
   if (!pack.faces.some((entry) => entry.file === face.file)) return undefined;
-  const url = fontCdnAssetUrl(pack, file, baseUrl);
+  const url = fontCdnAssetUrl(pack.pack, file, baseUrl);
   cdnTimeouts.set(url, timeoutMs);
   return url;
 }
@@ -210,9 +210,9 @@ async function assetUrl(
     const latin = await loadLatinAssetUrls();
     const resolveLatin = latin?.[file];
     if (resolveLatin) return resolveLatin();
-    const cdn = cdnAssetUrl(face);
-    if (cdn) return cdn;
     if (!latin) {
+      const cdn = cdnAssetUrl(face);
+      if (cdn) return cdn;
       throw new MissingFontAddonError(
         `Bundled font ${file} needs @betteroffice/fonts-latin - install @betteroffice/fonts-latin`,
       );
@@ -222,9 +222,9 @@ async function assetUrl(
     const intl = await loadIntlAssetUrls();
     const resolveIntl = intl?.[file];
     if (resolveIntl) return resolveIntl();
-    const cdn = cdnAssetUrl(face);
-    if (cdn) return cdn;
     if (!intl) {
+      const cdn = cdnAssetUrl(face);
+      if (cdn) return cdn;
       throw new MissingFontAddonError(
         `Bundled font ${file} needs the optional intl add-on - install @betteroffice/fonts-intl`,
       );
@@ -234,15 +234,18 @@ async function assetUrl(
     const cjk = await loadCjkAssetUrls();
     const resolveCjk = cjk?.[file];
     if (resolveCjk) return resolveCjk();
-    const cdn = cdnAssetUrl(face);
-    if (cdn) return cdn;
+    if (!cjk) {
+      const cdn = cdnAssetUrl(face);
+      if (cdn) return cdn;
+    }
     throw new MissingCjkAddonError(cjk
       ? `Bundled font ${file} needs a compressed @betteroffice/fonts-cjk release matching @betteroffice/fonts`
       : `Bundled font ${file} needs the optional CJK add-on — install @betteroffice/fonts-cjk`);
   }
+  const cdn = cdnAssetUrl(face);
+  if (cdn) return cdn;
   throw new Error(`Unknown bundled font asset: ${file}`);
 }
-
 async function sliceAssetUrl(
   face: BundledFontFace, file: string, baseUrl: URL | undefined, configuration = fontCdnConfiguration(),
 ): Promise<URL> {
@@ -250,12 +253,14 @@ async function sliceAssetUrl(
   const cjk = await loadCjkAssetUrls();
   const resolve = cjk?.[file];
   if (resolve) return resolve();
-  const cdn = cdnAssetUrl(face, file, configuration);
+  const cdn = !cjk ? cdnAssetUrl(face, file, configuration) : undefined;
   if (cdn) return cdn;
   throw new MissingCjkAddonError(cjk
     ? `Font slice ${file} needs a @betteroffice/fonts-cjk release matching @betteroffice/fonts`
     : `Font slice ${file} needs the optional CJK add-on — install @betteroffice/fonts-cjk`);
+
 }
+
 
 function sliceLocation(
   face: BundledFontFace,
@@ -266,18 +271,22 @@ function sliceLocation(
   const cdn = fontCdnConfiguration();
   return ref && {
     ref,
-    base: baseUrl?.href ?? (cdn.baseUrl ? fontCdnAssetUrl(packFor(face), '', cdn.baseUrl).href : ''),
+    base: baseUrl?.href ?? (cdn.baseUrl ? fontCdnAssetUrl(packFor(face).pack, '', cdn.baseUrl).href : ''),
     url: (file) => sliceAssetUrl(face, file, baseUrl, cdn),
     timeoutMs: baseUrl === undefined && cdn.baseUrl ? cdn.timeoutMs : undefined,
     requestTimeoutMs: cdnTimeout,
-    decode: sliceDecoder(baseUrl === undefined ? undefined : new URL('decoder/fontpack.wasm', baseUrl), runtime?.decoder),
+    decode: sliceDecoder(
+      baseUrl !== undefined ? new URL('decoder/fontpack.wasm', baseUrl)
+        : cdn.baseUrl ? fontCdnDecoderUrl(cdn.baseUrl) : undefined,
+      runtime?.decoder,
+    ),
     decoder: runtime?.decoder,
     retain: runtime?.retain,
   };
 }
 
 /**
- * Whether an installed pack or the configured CDN can serve `face`.
+ * Whether the configured CDN or an installed pack can serve `face`.
  * @internal
  */
 export async function bundledFaceInstalled(face: BundledFontFace): Promise<boolean> {
@@ -322,12 +331,16 @@ function bundledFontBytes(
     options?.baseUrl === undefined
       ? undefined
       : resolvedAssetBase(options.baseUrl);
+  const configured = fontCdnConfiguration();
+  const wasmUrl = baseUrl !== undefined
+    ? new URL('decoder/fontpack.wasm', baseUrl)
+    : configured.baseUrl === false ? undefined : fontCdnDecoderUrl(configured.baseUrl);
   const bytes = isBaseLatinFont(face.file) || isLatinFont(face.file) || INTL_FILES.has(face.file) || CJK_FILES.has(face.file)
     ? packed(
       face,
       (dependency) => assetUrl(dependency, baseUrl),
       cdnTimeout,
-      baseUrl === undefined ? undefined : new URL('decoder/fontpack.wasm', baseUrl),
+      wasmUrl,
       undefined,
       runtime,
     )
@@ -421,8 +434,12 @@ export function createFontProvider(
  */
 export const decodeFontFaceOutsideEngine: FontDecoder = async (bytes, { codec, dict, maxOutput }) => {
   const decoder = await import('./decode');
+  const configuration = fontCdnConfiguration();
   try {
-    return await decoder.decodeFontFace(bytes, dict, { codec, maxOutput });
+    return await decoder.decodeFontFace(bytes, dict, {
+      codec, maxOutput,
+      wasmUrl: configuration.baseUrl === false ? undefined : fontCdnDecoderUrl(configuration.baseUrl),
+    });
   } finally {
     decoder.releaseFontDecoder();
   }

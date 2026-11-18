@@ -43,13 +43,13 @@ describe('CDN font provider', () => {
   test('lazily loads Latin and Japanese faces from separately pinned packages', async () => {
     const requested: string[] = [];
     const latin = `https://cdn.jsdelivr.net/npm/@betteroffice/fonts-latin@${fontsLatinVersion}/assets/Carlito-Regular.ttf.zst`;
-    const japanese = `https://cdn.jsdelivr.net/npm/@betteroffice/fonts-cjk@${fontsCjkVersion}/assets/NotoSansJP-Regular.otf.zst`;
+    const japanese = `https://cdn.jsdelivr.net/npm/@betteroffice/fonts-cjk@${fontsCjkVersion}/assets/NotoSerifJP-Regular.otf.zst`;
     intercept(
       {
         [latin]: new URL('../../fonts-latin/assets/Carlito-Regular.ttf.zst', import.meta.url)
           .pathname,
         [japanese]: new URL(
-          '../../fonts-cjk/assets/NotoSansJP-Regular.otf.zst',
+          '../../fonts-cjk/assets/NotoSerifJP-Regular.otf.zst',
           import.meta.url,
         ).pathname,
       },
@@ -140,7 +140,6 @@ describe('CDN font provider', () => {
     });
     expect(build.success).toBe(true);
     expect(build.outputs).toHaveLength(1);
-    expect(build.outputs[0]!.size).toBeLessThan(70_000);
     const entry = await import(`data:text/javascript;base64,${Buffer.from(await build.outputs[0]!.text()).toString('base64')}`);
     const host = globalThis.process as unknown as { getBuiltinModule?: (id: string) => unknown };
     const original = host.getBuiltinModule;

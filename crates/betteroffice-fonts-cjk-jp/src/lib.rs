@@ -1,15 +1,11 @@
 pub const MANIFEST: &str = include_str!(env!("FONT_PACK_MANIFEST"));
 
-static FACE_0: &[u8] = include_bytes!(concat!(
-    env!("FONT_PACK_ASSETS"),
-    "/NotoSansJP-Regular.otf.zst"
-));
+mod embedded {
+    include!(concat!(env!("OUT_DIR"), "/faces.rs"));
+}
 
 pub fn face(file: &str) -> Option<&'static [u8]> {
-    match file {
-        "NotoSansJP-Regular.otf.zst" => Some(FACE_0),
-        _ => None,
-    }
+    embedded::face(file)
 }
 
 #[cfg(test)]

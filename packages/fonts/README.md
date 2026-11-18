@@ -47,6 +47,25 @@ the module.
 
 ## Serving the faces from a CDN
 
+For the CI-managed Northstar CDN, configure the regular entry before initializing editors:
+
+```ts
+import { configureFontCdn } from '@betteroffice/fonts';
+
+configureFontCdn({ baseUrl: 'https://static-northstar.stepfun.com/' });
+```
+
+An explicitly configured CDN supplies the default font resources even when local font packs
+are installed. Per-call `baseUrl` overrides still take precedence; disabling CDN configuration
+with `baseUrl: false` keeps bundled loading. Failed CDN requests do not silently switch sources.
+The `font-assets.yml` workflow builds and uploads versioned package resources before verifying
+their content, CORS and cache headers. Publish the matching versions before deploying consumers:
+
+- `fonts-cjk/<version>/assets/`, including the whole faces and outline slices;
+- `fonts-latin/<version>/assets/` and `fonts-intl/<version>/assets/`;
+- `fonts/<version>/assets/` for the base Latin faces, and
+  `fonts/<version>/dist/decoder/fontpack.wasm` for the decoder.
+
 The `@betteroffice/fonts/cdn` entry keeps the font binaries and the optional add-ons out of your bundle. It
 fetches faces from jsDelivr URLs pinned to the installed package versions:
 
@@ -91,6 +110,15 @@ configureDefaultFonts({ fonts, baseUrl: 'https://cdn.example.com/betteroffice-fo
   `<baseUrl>/decoder/fontpack.wasm` when it is served (as `application/wasm`) and otherwise the decoder the package ships in
   `dist/decoder/`, which bundlers emit next to the entry. When neither loads, decoding fails with
   `Font decoder wasm not found` and both URLs.
+
+Only serve URLs containing an immutable package version or content hash with
+`Cache-Control: public, max-age=31536000, immutable`. Do not apply that policy to a mutable
+directory whose filenames are reused across releases. Browser HTTP caching can reuse downloaded
+responses but does not guarantee a cache hit. HTTP(S) compressed-resource reads share only
+in-flight work within one JavaScript realm, including multiple module copies; main threads and
+workers have separate in-flight state. Completed compressed responses are not retained in an
+additional JavaScript byte cache. There is no application-wide download queue. Decoded faces,
+registered `FontFace` objects and the existing raw-TTF cache have separate runtime lifetimes.
 
 ## Checking installed packs
 

@@ -292,10 +292,17 @@ describe('internal font decoder', () => {
     test.skipIf(!hasWasm)('without native zstd or wasmUrl the default decoder url loads the built wasm', async () => {
       const deployment = mkdtempSync(join(tmpdir(), 'fonts-decoder-'));
       try {
-        copyFileSync(new URL('./decode.ts', import.meta.url), join(deployment, 'decode.ts'));
+        const build = await Bun.build({
+          entrypoints: [new URL('./decode.ts', import.meta.url).pathname],
+          target: 'browser',
+          outdir: deployment,
+          naming: 'decode.js',
+        });
+        if (!build.success) throw new Error(`Could not bundle decoder fixture: ${build.logs.map(log => log.message).join('\n')}`);
         mkdirSync(join(deployment, 'decoder'));
         copyFileSync(wasmUrl, join(deployment, 'decoder/fontpack.wasm'));
-        const { decodeFontBytes: decode } = await import(pathToFileURL(join(deployment, 'decode.ts')).href);
+        // This consumer bundle exists only in the test's temporary deployment.
+        const { decodeFontBytes: decode } = await import(pathToFileURL(join(deployment, 'decode.js')).href);
         expect(new Uint8Array(await decode(helloFrame))).toEqual(hello);
         const corrupt = helloFrame.slice();
         corrupt[corrupt.length - 1] ^= 1;

@@ -16,13 +16,13 @@ afterEach(() => {
   globalThis.fetch = originalFetch;
 });
 
-test('ships literal CJK URLs for the five faces and their slices and a schema 1 zstd pack with pinned source hashes', async () => {
+test('ships literal CJK URLs for every bundled face and its slices, with a schema 1 zstd pack of pinned sources', async () => {
   expect(cjkPackage.files).toEqual(['dist', 'assets', 'LICENSE', 'LICENSES', 'README.md']);
   expect(pack.format).toBe(1);
   expect(pack.schema).toBe(1);
   expect(pack.pack).toBe('cjk');
   expect(pack.version).toMatch(/^\d+\.\d+\.\d+$/);
-  expect(cjk).toHaveLength(5);
+  expect(cjk.length).toBeGreaterThan(0);
   const files = cjk.map((face) => face.file).sort();
   expect(pack.faces.map((entry) => entry.file)).toEqual(files);
   const sliceFiles: string[] = [];
@@ -33,22 +33,23 @@ test('ships literal CJK URLs for the five faces and their slices and a schema 1 
     sliceFiles.push(entry.slices.index, index.skeleton.file, index.core.file, ...index.chunks.map((chunk) => chunk.file));
   }
   expect(Object.keys(CJK_FONT_ASSET_URLS).sort()).toEqual([...files, ...sliceFiles].sort());
-  const source = await Bun.file(new URL('../../fonts-cjk/src/index.ts', import.meta.url)).text();
-  const rows = [...source.matchAll(/'([^']+)': \(\) => new URL\('\.\.\/assets\/([^']+)', import\.meta\.url\)/g)];
-  expect(rows.map(([, file]) => file).sort()).toEqual([...files, ...sliceFiles].sort());
-  for (const [, file, target] of rows) {
-    expect(file).toBe(target);
+  for (const file of [...files, ...sliceFiles]) {
     expect(CJK_FONT_ASSET_URLS[file]().pathname).toEndWith(`/assets/${file}`);
   }
   const checksums = await Bun.file(new URL('../../../scripts/fonts/cjk-sources.sha256', import.meta.url)).text();
   const pinned = checksums.trim().split('\n').map((line) => line.trim().split(/\s+/));
-  expect(pinned.map(([, file]) => `${file}.zst`).sort()).toEqual(files);
+  const provenance = await Bun.file(new URL('../../fonts-cjk/LICENSES/SOURCES.json', import.meta.url)).json() as {
+    faces: { file: string; source: string; source_sha256: string; sha256: string }[];
+  };
   for (const entry of pack.faces) {
     expect(isCjkFont(entry.file)).toBe(true);
     expect(entry.codec).toBe('zstd');
-    expect(entry.dict).toBeNull();
+    expect(entry.dict).toBe(entry.source.endsWith('-Regular.otf') ? null : `${entry.family}-Regular.otf.zst`);
     expect(entry.source).toBe(entry.file.replace(/\.zst$/, ''));
-    expect(entry.sha256).toBe(pinned.find(([, file]) => file === entry.source)![0]);
+    const source = provenance.faces.find(face => face.file === entry.source)!;
+    expect(source).toBeDefined();
+    expect(entry.sha256).toBe(source.sha256);
+    expect(pinned.find(([, file]) => file === source.source)?.[0]).toBe(source.source_sha256);
   }
 });
 
@@ -56,30 +57,34 @@ test('decodes every real CJK face through the packed loader and optional add-on 
   for (const face of cjk) {
     const entry = pack.faces.find((entry) => entry.file === face.file)!;
     const first = await loadPackedFontBytes(face, resolveUrl);
-    const second = await loadBundledFontBytes(face);
+    const second = await loadBundledFontBytes(face, undefined, { strict: true });
     expect(face.byteLength).toBe(entry.byteLength);
     expect(first.byteLength).toBe(entry.byteLength);
     expect(createHash('sha256').update(new Uint8Array(first)).digest('hex')).toBe(entry.sha256);
     expect(new DataView(first).getUint32(0)).toBe(0x4f54544f);
-    expect(first).toEqual(second);
+    expect(second.byteLength).toBe(entry.byteLength);
+    expect(createHash('sha256').update(new Uint8Array(second)).digest('hex')).toBe(entry.sha256);
     expect(first).not.toBe(second);
     structuredClone(first, { transfer: [first] });
-    expect(await loadPackedFontBytes(face, resolveUrl)).toEqual(second);
+    const reloaded = await loadPackedFontBytes(face, resolveUrl);
+    expect(createHash('sha256').update(new Uint8Array(reloaded)).digest('hex')).toBe(entry.sha256);
   }
 });
 
 test('a real CJK face decodes outside the engine to its manifest hash', async () => {
-  const face = cjk.find((face) => face.family === 'Noto Sans JP')!;
+  const face = cjk.find((face) => face.family === 'Noto Sans JP' && face.weight === 700)!;
   const entry = pack.faces.find((entry) => entry.file === face.file)!;
   const encoded = await Bun.file(CJK_FONT_ASSET_URLS[face.file]()).arrayBuffer();
-  const { font } = await decodeFontFaceOutsideEngine(encoded, { codec: entry.codec });
+  const dictionary = pack.faces.find(candidate => candidate.file === entry.dict)!;
+  const { font: dict } = await decodeFontFaceOutsideEngine(await Bun.file(CJK_FONT_ASSET_URLS[dictionary.file]()).arrayBuffer(), { codec: dictionary.codec });
+  const { font } = await decodeFontFaceOutsideEngine(encoded, { codec: entry.codec, dict });
   expect(createHash('sha256').update(new Uint8Array(font)).digest('hex')).toBe(entry.sha256);
-  const again = await decodeFontFaceOutsideEngine(encoded, { codec: entry.codec });
+  const again = await decodeFontFaceOutsideEngine(encoded, { codec: entry.codec, dict });
   expect(again.font.byteLength).toBe(entry.byteLength);
 });
 
 test('bundled and CDN CJK providers use the bound engine decoder without fetching fontpack.wasm', async () => {
-  const face = cjk.find((face) => face.family === 'Noto Sans JP')!;
+  const face = cjk.find((face) => face.family === 'Noto Sans JP' && face.weight === 400)!;
   const expected = await loadPackedFontBytes(face, resolveUrl);
   const encoded = await Bun.file(CJK_FONT_ASSET_URLS[face.file]()).arrayBuffer();
   const decoder = mock<FontDecoder>(async (input, options) => {

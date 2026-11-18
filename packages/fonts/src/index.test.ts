@@ -65,20 +65,22 @@ describe('resolution', () => {
 
   test('falls back to a family regular when the exact style is not vendored', () => {
     expect(resolveMetricCompatFace('Calibri', true, true)?.file).toBe('Carlito-BoldItalic.ttf.zst');
-    expect(resolveMetricCompatFace('SimSun', true, false)?.file).toBe('NotoSerifSC-Regular.otf.zst');
+    expect(resolveMetricCompatFace('SimSun', true, false)?.file).toBe('NotoSerifSC-Bold.otf.zst');
+    expect(resolveMetricCompatFace('SimSun', false, true)?.style).toBe('normal');
   });
 
-  test('MS Japanese spellings resolve to the bundled Japanese face in every style', () => {
+  test('MS Japanese spellings resolve to the bundled Japanese face of their own style', () => {
     for (const family of [
-      'MS Mincho', 'ＭＳ 明朝', 'MS Gothic', 'ＭＳ ゴシック',
-      'MS PMincho', 'ＭＳ Ｐ明朝', 'MS PGothic', 'ＭＳ Ｐゴシック', 'MS UI Gothic',
+      'MS Mincho', 'ＭＳ 明朝', 'MS PMincho', 'ＭＳ Ｐ明朝',
     ]) {
+      expect(resolveMetricCompatFamily(` ${family.toUpperCase()} `)).toBe('Noto Serif JP');
+      expect(resolveMetricCompatFace(family, false, false)?.file).toBe('NotoSerifJP-Regular.otf.zst');
+      expect(resolveMetricCompatFace(family, true, false)?.file).toBe('NotoSerifJP-Bold.otf.zst');
+    }
+    for (const family of ['MS Gothic', 'ＭＳ ゴシック', 'MS PGothic', 'ＭＳ Ｐゴシック', 'MS UI Gothic']) {
       expect(resolveMetricCompatFamily(` ${family.toUpperCase()} `)).toBe('Noto Sans JP');
-      for (const bold of [false, true]) {
-        for (const italic of [false, true]) {
-          expect(resolveMetricCompatFace(family, bold, italic)?.file).toBe('NotoSansJP-Regular.otf.zst');
-        }
-      }
+      expect(resolveMetricCompatFace(family, false, false)?.file).toBe('NotoSansJP-Regular.otf.zst');
+      expect(resolveMetricCompatFace(family, true, false)?.file).toBe('NotoSansJP-Bold.otf.zst');
     }
   });
 
@@ -362,15 +364,17 @@ describe('bundled family names', () => {
 
   test('never stand in another style, so the browser can synthesize it', () => {
     expect(resolveBundledFamilyFace('Oswald', false, true)).toBeUndefined();
-    expect(resolveBundledFamilyFace('Noto Serif SC', true, false)).toBeUndefined();
-    expect(resolveBundledFamilyFace('SimSun', true, false)).toBeUndefined();
-    expect(resolveMetricCompatFace('SimSun', true, false)?.file).toBe('NotoSerifSC-Regular.otf.zst');
+    expect(resolveBundledFamilyFace('Noto Serif SC', false, true)).toBeUndefined();
+    expect(resolveBundledFamilyFace('Noto Sans SC', false, true)).toBeUndefined();
+    expect(resolveMetricCompatFace('SimSun', true, false)?.file).toBe('NotoSerifSC-Bold.otf.zst');
+    expect(resolveMetricCompatFace('SimSun', false, true)?.style).toBe('normal');
   });
 
-  test('cover the serif Noto families the package does not vendor with the sans face', () => {
-    expect(resolveBundledFamilyFace('Noto Serif TC', false, false)?.family).toBe('Noto Sans TC');
-    expect(resolveBundledFamilyFace('Noto Serif JP', false, false)?.family).toBe('Noto Sans JP');
-    expect(resolveBundledFamilyFace('Noto Serif KR', false, false)?.family).toBe('Noto Sans KR');
+  test('reach the serif Noto families of every region', () => {
+    expect(resolveBundledFamilyFace('Noto Serif TC', false, false)?.file).toBe('NotoSerifTC-Regular.otf.zst');
+    expect(resolveBundledFamilyFace('Noto Serif JP', false, false)?.file).toBe('NotoSerifJP-Regular.otf.zst');
+    expect(resolveBundledFamilyFace('Noto Serif KR', false, false)?.file).toBe('NotoSerifKR-Regular.otf.zst');
+    expect(resolveBundledFamilyFace('Noto Serif TC', true, false)?.file).toBe('NotoSerifTC-Bold.otf.zst');
   });
 
   test('fall back to Word-family resolution and miss unknown names', () => {

@@ -1,5 +1,6 @@
 import intlSizes from './intl-sizes.json';
 import latinManifest from '../../fonts-latin/assets/manifest.json';
+import cjkManifest from '../../fonts-cjk/assets/manifest.json';
 import baseLatinManifest from '../assets/base-latin.json';
 
 /** @internal */
@@ -46,6 +47,9 @@ export type BundledFontScript =
   | 'cherokee'
   | 'tifinagh';
 
+/** Weight of a static face, as CSS `font-weight`. */
+export type StaticFontWeight = 100 | 200 | 300 | 350 | 400 | 500 | 600 | 700 | 800 | 900;
+
 /** One bundled font binary and the Word font(s) it stands in for. */
 export interface BundledFontFace {
   /** Family name as it appears in the font's own name table, e.g. "Carlito". */
@@ -56,7 +60,8 @@ export interface BundledFontFace {
    * (see the module doc). Absent on the pure script-fallback faces (RTL).
    */
   metricCompatWith?: string;
-  weight: 400 | 700;
+  /** The static face's own weight; never a synthesized heavier or lighter one. */
+  weight: StaticFontWeight;
   style: 'normal' | 'italic';
   /** Asset filename within its font pack. */
   file: string;
@@ -125,6 +130,151 @@ function intlFamilyFaces(
     }];
   });
 }
+
+/** Static weights the Sans pack ships, keyed by filename suffix. */
+const CJK_SANS_WEIGHTS: Record<string, StaticFontWeight> = {
+  Thin: 100,
+  Light: 300,
+  DemiLight: 350,
+  Regular: 400,
+  Medium: 500,
+  Bold: 700,
+  Black: 900,
+};
+
+/** Static weights the Serif pack ships, keyed by filename suffix. */
+const CJK_SERIF_WEIGHTS: Record<string, StaticFontWeight> = {
+  ExtraLight: 200,
+  Light: 300,
+  Regular: 400,
+  Medium: 500,
+  SemiBold: 600,
+  Bold: 700,
+  Black: 900,
+};
+
+/** Bundled family of the Kai face: a renamed ZhenKai GB derivative, not KaiTi's metrics. */
+export const KAI_FAMILY = 'Northstar Kai';
+
+const CJK_REGIONS: Record<string, BundledFontScript> = {
+  SC: 'cjk-sc',
+  TC: 'cjk-tc',
+  JP: 'cjk-jp',
+  KR: 'cjk-kr',
+};
+
+/** Word families the regional sans face stands in for (coverage, not metrics). */
+const CJK_SANS_WORD_FAMILIES: Record<string, string> = {
+  SC: 'Microsoft YaHei',
+  TC: 'Microsoft JhengHei',
+  JP: 'MS Gothic',
+  KR: 'Malgun Gothic',
+};
+
+/** Word families the regional serif face stands in for (coverage, not metrics). */
+const CJK_SERIF_WORD_FAMILIES: Record<string, string> = {
+  SC: 'SimSun',
+  TC: 'PMingLiU',
+  JP: 'MS Mincho',
+  KR: 'Batang',
+};
+
+interface PackedCjkFace {
+  file: string;
+  byteLength: number;
+}
+
+/**
+ * The pack's declared faces, read through a shape check: the manifest is the
+ * only source of CJK file names and sizes, so a face never carries a
+ * hand-written length.
+ */
+function packedCjkFaces(value: unknown): PackedCjkFace[] {
+  if (typeof value !== 'object' || value === null || !('faces' in value) || !Array.isArray(value.faces)) {
+    throw new Error('Unsupported CJK font pack manifest');
+  }
+  return value.faces.flatMap((face: unknown) => {
+    if (typeof face !== 'object' || face === null) return [];
+    const { file, byteLength } = face as { file?: unknown; byteLength?: unknown };
+    return typeof file === 'string' && typeof byteLength === 'number' ? [{ file, byteLength }] : [];
+  });
+}
+
+interface CjkFaceSpec {
+  family: string;
+  /** Approved asset filename, e.g. `NotoSansSC-Medium.otf.zst`. */
+  file: string;
+  weight: StaticFontWeight;
+  script: BundledFontScript;
+  /** The Word family this face stands in for; only a family's Regular carries one. */
+  metricCompatWith?: string;
+}
+
+/**
+ * The approved CJK set in fallback order: Sans and Serif for each region, the
+ * sans face of a bucket first so a script fallback takes the regional default.
+ */
+function cjkFaceSpecs(): CjkFaceSpec[] {
+  const regions = ['SC', 'TC', 'JP', 'KR'] as const;
+  const kinds = [
+    { base: 'NotoSans', family: 'Noto Sans', weights: CJK_SANS_WEIGHTS, word: CJK_SANS_WORD_FAMILIES },
+    { base: 'NotoSerif', family: 'Noto Serif', weights: CJK_SERIF_WEIGHTS, word: CJK_SERIF_WORD_FAMILIES },
+  ] as const;
+  const faces = regions.flatMap((region) =>
+    kinds.flatMap(({ base, family, weights, word }) =>
+      Object.entries(weights).map(([suffix, weight]) => ({
+        family: `${family} ${region}`,
+        file: `${base}${region}-${suffix}.otf.zst`,
+        weight,
+        script: CJK_REGIONS[region]!,
+        ...(weight === 400 ? { metricCompatWith: word[region] } : undefined),
+      })),
+    ),
+  );
+  return [...faces, {
+    family: KAI_FAMILY,
+    file: 'NorthstarKai-Regular.otf.zst',
+    weight: 400,
+    script: 'cjk-sc',
+    metricCompatWith: 'KaiTi',
+  }];
+}
+
+/**
+ * The approved CJK set as the given pack ships it. A face the pack has not
+ * generated is left out and reported as missing instead of borrowing another
+ * face's bytes, so a resolution never names a file that does not exist.
+ * @internal
+ */
+export function bundledCjkFaces(pack: unknown): {
+  faces: BundledFontFace[];
+  missing: string[];
+} {
+  const packed = packedCjkFaces(pack);
+  const specs = cjkFaceSpecs();
+  const faces = specs.flatMap((spec) => {
+    const entry = packed.find((face) => face.file === spec.file);
+    return entry === undefined ? [] : [{
+      family: spec.family,
+      ...(spec.metricCompatWith === undefined ? undefined : { metricCompatWith: spec.metricCompatWith }),
+      weight: spec.weight,
+      style: 'normal' as const,
+      file: entry.file,
+      byteLength: entry.byteLength,
+      script: spec.script,
+    }];
+  });
+  const missing = specs
+    .filter((spec) => !packed.some((face) => face.file === spec.file))
+    .map((spec) => spec.file);
+  return { faces, missing };
+}
+
+const installedCjk = bundledCjkFaces(cjkManifest);
+const cjkStaticFaces = installedCjk.faces;
+
+/** Approved static faces the installed pack has not generated yet. */
+export const MISSING_CJK_FONT_ASSETS: readonly string[] = installedCjk.missing;
 
 const bundledFaces: BundledFontFace[] = [
   ...familyFaces(
@@ -353,54 +503,13 @@ const bundledFaces: BundledFontFace[] = [
   ...intlFamilyFaces('Noto Sans Lao Looped', 'lao', 'NotoSansLaoLooped'),
   ...intlFamilyFaces('Noto Sans Tifinagh', 'tifinagh', 'NotoSansTifinagh'),
 
-  // CJK coverage faces (Regular-only statics; see the module doc). The sans
-  // face precedes the serif face of the same script bucket on purpose.
-  {
-    family: 'Noto Sans SC',
-    metricCompatWith: 'Microsoft YaHei',
-    weight: 400,
-    style: 'normal',
-    file: 'NotoSansSC-Regular.otf.zst',
-    byteLength: 8331336,
-    script: 'cjk-sc',
-  },
-  {
-    family: 'Noto Serif SC',
-    metricCompatWith: 'SimSun',
-    weight: 400,
-    style: 'normal',
-    file: 'NotoSerifSC-Regular.otf.zst',
-    byteLength: 11625800,
-    script: 'cjk-sc',
-  },
-  {
-    family: 'Noto Sans TC',
-    metricCompatWith: 'Microsoft JhengHei',
-    weight: 400,
-    style: 'normal',
-    file: 'NotoSansTC-Regular.otf.zst',
-    byteLength: 5683368,
-    script: 'cjk-tc',
-  },
-  {
-    family: 'Noto Sans JP',
-    metricCompatWith: 'MS Gothic',
-    weight: 400,
-    style: 'normal',
-    file: 'NotoSansJP-Regular.otf.zst',
-    byteLength: 4533028,
-    script: 'cjk-jp',
-  },
-  {
-    family: 'Noto Sans KR',
-    metricCompatWith: 'Malgun Gothic',
-    weight: 400,
-    style: 'normal',
-    file: 'NotoSansKR-Regular.otf.zst',
-    byteLength: 4644748,
-    script: 'cjk-kr',
-  },
+  // CJK static faces come from the @betteroffice/fonts-cjk pack manifest, so a
+  // face exists only when its binary exists. The sans face precedes the serif
+  // face of the same script bucket on purpose: a script fallback picks the
+  // sans default, and a serif request reaches its serif face by family name.
+  ...cjkStaticFaces,
 ];
+
 
 const latinFaces = new Map(latinManifest.faces.map((face) => [face.source, face]));
 
@@ -410,6 +519,63 @@ export const BUNDLED_FONTS: BundledFontFace[] = bundledFaces.map((face) => {
   return packed === undefined ? face : { ...face, file: packed.file, byteLength: packed.byteLength };
 });
 
+const bundledFamilyNames: ReadonlySet<string> = new Set(
+  BUNDLED_FONTS.map((face) => face.family.toLowerCase()),
+);
+
+/**
+ * CJK Word names whose target depends on the pack: a regional Ming/Mincho/
+ * Batang name reaches its serif face once that binary ships, and keeps the
+ * regional sans face until then. A shipped serif needs no entry — its own
+ * Word family name already matches the face's `metricCompatWith`.
+ */
+interface RegionalSerifNames {
+  /** The Word family that is the serif face's own `metricCompatWith`. */
+  canonical: string;
+  /** Further spellings of the same serif, or undefined when no spelling needs an entry. */
+  synonyms: readonly string[];
+  /** The regional sans face that covers these names until the serif ships. */
+  sans: string;
+}
+
+const REGIONAL_SERIF: Record<'tc' | 'jp' | 'kr', RegionalSerifNames> = {
+  tc: { canonical: 'pmingliu', synonyms: ['mingliu', '新細明體', '細明體'], sans: 'microsoft jhenghei' },
+  jp: {
+    canonical: 'ms mincho',
+    synonyms: ['ms pmincho', 'yu mincho', 'ｍｓ 明朝', 'ｍｓ ｐ明朝', '游明朝'],
+    sans: 'ms gothic',
+  },
+  kr: { canonical: 'batang', synonyms: ['gungsuh'], sans: 'malgun gothic' },
+};
+
+/**
+ * Ming/Mincho/Batang spellings. A shipped serif is reached through its own Word
+ * family name, so it aliases to itself; until it ships, every spelling keeps the
+ * regional sans face. `shipped` holds the lowercased bundled family names.
+ */
+export function cjkWordFamilyAliases(shipped: ReadonlySet<string>): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(REGIONAL_SERIF).flatMap(([region, { canonical, synonyms, sans }]) => {
+      const target = shipped.has(`noto serif ${region}`) ? canonical : sans;
+      return [canonical, ...synonyms].map((name) => [name, target]);
+    }),
+  );
+}
+
+/**
+ * Word spellings the Kai face answers for, including Word's GB2312 alias. They
+ * resolve to the Kai family only once its binary ships; until then they keep
+ * the Simplified Chinese serif face.
+ */
+const KAI_WORD_NAMES = new Set(['kaiti', '楷体', 'kaiti_gb2312', 'kaiti gb2312', 'kaiti-gb2312']);
+
+const kaiBundled = bundledFamilyNames.has(KAI_FAMILY.toLowerCase());
+
+const CJK_DYNAMIC_ALIASES: Record<string, string> = {
+  ...cjkWordFamilyAliases(bundledFamilyNames),
+  ...Object.fromEntries([...KAI_WORD_NAMES].map(name => [name, kaiBundled ? 'kaiti' : 'simsun'])),
+};
+
 /**
  * Alternate Word font names that resolve to the same bundled face as a
  * covered Word family (keys and values lowercase). Kept separate from the
@@ -418,10 +584,10 @@ export const BUNDLED_FONTS: BundledFontFace[] = bundledFaces.map((face) => {
  *
  * The CJK alias set mirrors the CJK table in core's `utils/fontResolver.ts`
  * (both romanized and native spellings; native full-width Latin lowercases
- * too, e.g. `ＭＳ ゴシック` -> `ｍｓ ゴシック`). Where fontResolver picks a
- * serif Noto family this package does not vendor (Noto Serif TC/JP/KR), the
- * alias points at the vendored sans face of the same region — coverage
- * first.
+ * too, e.g. `ＭＳ ゴシック` -> `ｍｓ ゴシック`). A regional serif name points at
+ * the regional serif face only once the installed pack ships it; otherwise it
+ * keeps the vendored sans face of the same region — coverage first. The Kai
+ * names switch to {@link KAI_FAMILY} only when that binary exists.
  */
 export const WORD_FAMILY_ALIASES: Record<string, string> = {
   helvetica: 'arial',
@@ -461,15 +627,14 @@ export const WORD_FAMILY_ALIASES: Record<string, string> = {
   微软雅黑: 'microsoft yahei',
   黑体: 'microsoft yahei',
   等线: 'microsoft yahei',
-  // Simplified Chinese — serif
+  // Simplified Chinese — serif (a Kai spelling moves to the Kai face once it ships)
   nsimsun: 'simsun',
   fangsong: 'simsun',
   kaiti: 'simsun',
   宋体: 'simsun',
   仿宋: 'simsun',
   楷体: 'simsun',
-  // Traditional Chinese (the Ming/Kai serif families map to the sans face —
-  // Noto Serif TC is not vendored)
+  // Traditional Chinese: the Ming serif faces once the pack ships them, else sans
   微軟正黑體: 'microsoft jhenghei',
   pmingliu: 'microsoft jhenghei',
   mingliu: 'microsoft jhenghei',
@@ -477,8 +642,7 @@ export const WORD_FAMILY_ALIASES: Record<string, string> = {
   新細明體: 'microsoft jhenghei',
   細明體: 'microsoft jhenghei',
   標楷體: 'microsoft jhenghei',
-  // Japanese (the Mincho serif families map to the sans face — Noto Serif JP
-  // is not vendored)
+  // Japanese: the Mincho serif faces once the pack ships them, else sans
   'ms pgothic': 'ms gothic',
   'ms ui gothic': 'ms gothic',
   meiryo: 'ms gothic',
@@ -493,8 +657,7 @@ export const WORD_FAMILY_ALIASES: Record<string, string> = {
   'ｍｓ 明朝': 'ms gothic',
   'ｍｓ ｐ明朝': 'ms gothic',
   游明朝: 'ms gothic',
-  // Korean (Batang/Gungsuh serif map to the sans face — Noto Serif KR is not
-  // vendored)
+  // Korean: the Batang/Gungsuh serif faces once the pack ships them, else sans
   '맑은 고딕': 'malgun gothic',
   gulim: 'malgun gothic',
   dotum: 'malgun gothic',
@@ -506,6 +669,9 @@ export const WORD_FAMILY_ALIASES: Record<string, string> = {
   궁서: 'malgun gothic',
 };
 
+// Overrides keep the shipped-table key order so generated catalogs stay stable.
+Object.assign(WORD_FAMILY_ALIASES, CJK_DYNAMIC_ALIASES);
+
 const metricCompatByWordFamily = new Map<string, string>();
 for (const face of BUNDLED_FONTS) {
   if (face.metricCompatWith !== undefined) {
@@ -515,6 +681,63 @@ for (const face of BUNDLED_FONTS) {
     );
   }
 }
+if (kaiBundled) metricCompatByWordFamily.set('kaiti', KAI_FAMILY);
+
+/**
+ * Weight a family name spells out, as CSS `font-weight`. A static family is
+ * selected by its own name — `"Noto Sans SC Medium"`, `"Noto Sans SC Black"` —
+ * because the Word model carries only a bold flag.
+ */
+export const STATIC_WEIGHT_SUFFIXES: Readonly<Record<string, StaticFontWeight>> = {
+  thin: 100,
+  hairline: 100,
+  extralight: 200,
+  ultralight: 200,
+  light: 300,
+  demilight: 350,
+  semilight: 350,
+  regular: 400,
+  medium: 500,
+  demibold: 600,
+  semibold: 600,
+  bold: 700,
+  extrabold: 800,
+  black: 900,
+  heavy: 900,
+};
+
+/**
+ * The upright face a name such as `"Noto Sans SC Medium"` or
+ * `"Microsoft YaHei Light"` spells out, at the weight the name carries, or
+ * undefined when the prefix names no bundled family or no face ships at that
+ * weight — the name then keeps its existing resolution.
+ * @internal
+ */
+export function resolveStaticWeightFace(
+  faces: readonly BundledFontFace[],
+  families: ReadonlyMap<string, string>,
+  name: string,
+): BundledFontFace | undefined {
+  const words = name.trim().split(/[\s-]+/);
+  if (words.length < 2) return undefined;
+  const weight = STATIC_WEIGHT_SUFFIXES[words[words.length - 1]!.toLowerCase()];
+  if (weight === undefined) return undefined;
+  const family = families.get(words.slice(0, -1).join(' ').toLowerCase());
+  if (family === undefined) return undefined;
+  return faces.find(
+    (face) => face.family === family && face.weight === weight && face.style === 'normal',
+  );
+}
+
+/** Every lowercased name that resolves to a bundled family: family names, Word families, aliases. */
+const familyByName: ReadonlyMap<string, string> = new Map<string, string>([
+  ...BUNDLED_FONTS.flatMap((face): [string, string][] => [[face.family.toLowerCase(), face.family]]),
+  ...metricCompatByWordFamily,
+  ...Object.entries(WORD_FAMILY_ALIASES).flatMap(([alias, target]): [string, string][] => {
+    const family = metricCompatByWordFamily.get(target);
+    return family === undefined ? [] : [[alias, family]];
+  }),
+]);
 
 /**
  * Resolve a Word font name (case-insensitive) to the bundled substitute
@@ -530,17 +753,16 @@ export function resolveMetricCompatFamily(
 
 /**
  * Resolve a Word font name plus style request to a concrete bundled face.
- * Exact (weight, style) match first; families that only ship a Regular (the
- * CJK set) fall back to it — bold then falls back through the font chain,
- * mirroring how the measurement registry treats embedded faces. Selawik
- * ships upright faces only, so italic Segoe UI keeps the fallback chain and
- * its true italic.
+ * Exact style first; CJK synthesis keeps the requested upright weight before
+ * falling back to Regular. Italic Segoe UI still uses the true italic chain.
  */
 export function resolveMetricCompatFace(
   wordFamily: string,
   bold: boolean,
   italic: boolean,
 ): BundledFontFace | undefined {
+  const named = resolveStaticWeightFace(BUNDLED_FONTS, familyByName, wordFamily);
+  if (named) return named;
   const family = resolveMetricCompatFamily(wordFamily);
   if (!family) return undefined;
   if (family === 'Selawik') {
@@ -557,6 +779,7 @@ export function resolveMetricCompatFace(
   const style = italic ? 'italic' : 'normal';
   return (
     faces.find((f) => f.weight === weight && f.style === style) ??
+    (faces[0]?.script?.startsWith('cjk-') ? faces.find((f) => f.weight === weight && f.style === 'normal') : undefined) ??
     faces.find((f) => f.weight === 400 && f.style === 'normal')
   );
 }
@@ -565,12 +788,12 @@ const bundledFamilyByName = new Map(
   BUNDLED_FONTS.map((face) => [face.family.toLowerCase(), face.family]),
 );
 
-/** Serif Noto families this package does not vendor; the same region's sans face covers them. */
-const UNVENDORED_NOTO_SERIF: Record<string, string> = {
-  'noto serif tc': 'Noto Sans TC',
-  'noto serif jp': 'Noto Sans JP',
-  'noto serif kr': 'Noto Sans KR',
-};
+/** Serif Noto families the installed pack does not ship; the same region's sans face covers them. */
+const UNVENDORED_NOTO_SERIF: Record<string, string> = Object.fromEntries(
+  (['TC', 'JP', 'KR'] as const)
+    .filter((region) => !bundledFamilyNames.has(`noto serif ${region.toLowerCase()}`))
+    .map((region) => [`noto serif ${region.toLowerCase()}`, `Noto Sans ${region}`]),
+);
 
 /**
  * Resolve a family by its bundled name (`"Gelasio"`, `"Noto Sans SC"`) or as a
@@ -585,6 +808,8 @@ export function resolveBundledFamilyFace(
   if (family.trim().toLowerCase() === BASE_LATIN_FAMILY.toLowerCase()) {
     return BASE_LATIN_FONTS.find((face) => face.weight === (bold ? 700 : 400) && face.style === (italic ? 'italic' : 'normal'));
   }
+  const named = resolveStaticWeightFace(BUNDLED_FONTS, familyByName, family);
+  if (named) return named;
   if (resolveMetricCompatFamily(family) === 'Selawik') {
     return italic ? undefined : resolveMetricCompatFace(family, bold, false);
   }
@@ -627,10 +852,18 @@ export function resolveScriptFallbackFace(
 ): BundledFontFace | undefined {
   const preferred = family === undefined ? undefined
     : REQUESTED_FAMILY_SCRIPT_FALLBACK[family.trim().toLowerCase()]?.[script];
-  const faces = BUNDLED_FONTS.filter((f) => f.script === script);
+  let faces = BUNDLED_FONTS.filter((f) => f.script === script);
   if (preferred !== undefined) {
     const face = faces.find((f) => f.family === preferred && f.weight === 400 && f.style === 'normal');
     if (face !== undefined) return face;
+  }
+  if (family !== undefined && script.startsWith('cjk-')) {
+    const named = resolveStaticWeightFace(faces, familyByName, family);
+    if (named) return named;
+    const requested = resolveMetricCompatFamily(family) ?? bundledFamilyByName.get(family.trim().toLowerCase());
+    const preferredFamily = requested !== KAI_FAMILY && faces.some((face) => face.family === requested) ? requested
+      : requested === KAI_FAMILY || looksSerif(family) ? faces.find((face) => face.family.startsWith('Noto Serif '))?.family : undefined;
+    if (preferredFamily !== undefined) faces = faces.filter((face) => face.family === preferredFamily);
   }
   if (faces.length === 0) return undefined;
   const weight = bold ? 700 : 400;

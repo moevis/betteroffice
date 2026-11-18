@@ -16,5 +16,8 @@ betteroffice-fonts-cjk-jp.workspace = true
 betteroffice-fonts-cjk-kr.workspace = true
 betteroffice-fonts-cjk-serif-sc.workspace = true
 
+[build-dependencies]
+serde_json = "1"
+
 [dev-dependencies]
 serde_json = "1"

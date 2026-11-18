@@ -43,12 +43,42 @@ fn matches_style(face: &BundledFontFace, bold: bool, italic: bool) -> bool {
         && face.style == if italic { "italic" } else { "normal" }
 }
 
-pub fn resolve_metric_compat_family(word_family: &str) -> Option<&'static str> {
-    let key = key(word_family);
+/// The bundled Kai face, which keeps its Regular weight whatever the style.
+const KAI_FAMILY: &str = "Northstar Kai";
+/// Word spellings of the Kai face; they reach it only once the pack ships it.
+const KAI_WORD_NAMES: [&str; 5] = [
+    "kaiti",
+    "楷体",
+    "kaiti_gb2312",
+    "kaiti gb2312",
+    "kaiti-gb2312",
+];
+
+fn bundled_family_name(key: &str) -> Option<&'static str> {
+    catalog()
+        .faces
+        .iter()
+        .rev()
+        .find(|face| face.family.to_lowercase() == key)
+        .map(|face| face.family.as_str())
+}
+
+fn kai_family() -> Option<&'static str> {
+    catalog()
+        .faces
+        .iter()
+        .find(|face| face.family == KAI_FAMILY)
+        .map(|face| face.family.as_str())
+}
+
+fn metric_compat_family(key: &str) -> Option<&'static str> {
+    if KAI_WORD_NAMES.contains(&key) && let Some(family) = kai_family() {
+        return Some(family);
+    }
     let key = catalog()
         .word_family_aliases
-        .get(&key)
-        .map_or(key.as_str(), String::as_str);
+        .get(key)
+        .map_or(key, String::as_str);
     catalog().faces.iter().rev().find_map(|face| {
         face.metric_compat_with
             .as_ref()
@@ -57,11 +87,97 @@ pub fn resolve_metric_compat_family(word_family: &str) -> Option<&'static str> {
     })
 }
 
+pub fn resolve_metric_compat_family(word_family: &str) -> Option<&'static str> {
+    metric_compat_family(&key(word_family))
+}
+
+const STATIC_WEIGHT_SUFFIXES: [(&str, u16); 15] = [
+    ("thin", 100),
+    ("hairline", 100),
+    ("extralight", 200),
+    ("ultralight", 200),
+    ("light", 300),
+    ("demilight", 350),
+    ("semilight", 350),
+    ("regular", 400),
+    ("medium", 500),
+    ("demibold", 600),
+    ("semibold", 600),
+    ("bold", 700),
+    ("extrabold", 800),
+    ("black", 900),
+    ("heavy", 900),
+];
+
+fn split_weight_suffix(name: &str) -> Option<(&str, &str)> {
+    let trimmed = name.trim_matches(whitespace);
+    let (end, last) = trimmed
+        .char_indices()
+        .rev()
+        .find(|&(_, ch)| !whitespace(ch) && ch != '-')?;
+    let end = end + last.len_utf8();
+    let (separator, ch) = trimmed[..end]
+        .char_indices()
+        .rev()
+        .find(|&(_, ch)| whitespace(ch) || ch == '-')?;
+    Some((&trimmed[..separator], &trimmed[separator + ch.len_utf8()..end]))
+}
+
+fn name_key(name: &str) -> Option<String> {
+    let mut key = String::with_capacity(name.len());
+    for word in name
+        .split(|ch| whitespace(ch) || ch == '-')
+        .filter(|word| !word.is_empty())
+    {
+        if !key.is_empty() {
+            key.push(' ');
+        }
+        key.extend(word.chars().flat_map(char::to_lowercase));
+    }
+    (!key.is_empty()).then_some(key)
+}
+
+/// The weight a name such as `Noto Sans SC Medium` spells out, with the family that ships it.
+fn static_weight(name: &str) -> Option<(&'static str, u16)> {
+    let (prefix, suffix) = split_weight_suffix(name)?;
+    let mut suffixes = STATIC_WEIGHT_SUFFIXES.iter();
+    let weight = suffixes.find(|entry| suffix.eq_ignore_ascii_case(entry.0))?.1;
+    let name = name_key(prefix)?;
+    let family = metric_compat_family(&name).or_else(|| bundled_family_name(&name))?;
+    Some((family, weight))
+}
+
+/// The upright face a name such as `Noto Sans SC Medium` spells out, when that family ships the weight.
+fn static_weight_face(name: &str) -> Option<&'static BundledFontFace> {
+    let (family, weight) = static_weight(name)?;
+    upright_face(catalog().faces.iter(), family, weight)
+}
+
+fn upright_face<'a>(
+    mut faces: impl Iterator<Item = &'a BundledFontFace>,
+    family: &str,
+    weight: u16,
+) -> Option<&'a BundledFontFace> {
+    faces.find(|face| face.family == family && face.weight == weight && face.style == "normal")
+}
+
+fn is_cjk_family(family: &str) -> bool {
+    catalog()
+        .faces
+        .iter()
+        .find(|face| face.family == family)
+        .and_then(|face| face.script.as_deref())
+        .is_some_and(|script| script.starts_with("cjk-"))
+}
+
 pub fn resolve_metric_compat_face(
     word_family: &str,
     bold: bool,
     italic: bool,
 ) -> Option<&'static BundledFontFace> {
+    if let Some(face) = static_weight_face(word_family) {
+        return Some(face);
+    }
     let family = resolve_metric_compat_family(word_family)?;
     if family == "Selawik" {
         if italic {
@@ -85,7 +201,13 @@ pub fn resolve_metric_compat_face(
                 && face.weight == weight
         });
     }
-    family_face(family, bold, italic).or_else(|| family_face(family, false, false))
+    if let Some(face) = family_face(family, bold, italic) {
+        return Some(face);
+    }
+    if is_cjk_family(family) && let Some(face) = family_face(family, bold, false) {
+        return Some(face);
+    }
+    family_face(family, false, false)
 }
 
 fn family_face(family: &str, bold: bool, italic: bool) -> Option<&'static BundledFontFace> {
@@ -100,6 +222,9 @@ pub fn resolve_bundled_family_face(
     bold: bool,
     italic: bool,
 ) -> Option<&'static BundledFontFace> {
+    if let Some(face) = static_weight_face(family) {
+        return Some(face);
+    }
     if resolve_metric_compat_family(family) == Some("Selawik") {
         return if italic {
             None
@@ -108,20 +233,45 @@ pub fn resolve_bundled_family_face(
         };
     }
     let key = key(family);
-    let bundled = catalog()
-        .faces
-        .iter()
-        .rev()
-        .find(|face| face.family.to_lowercase() == key)
-        .map(|face| face.family.as_str())
+    let bundled = bundled_family_name(&key)
         .or_else(|| {
             catalog()
                 .unvendored_noto_serif
                 .get(&key)
                 .map(String::as_str)
         })
-        .or_else(|| resolve_metric_compat_family(family))?;
+        .or_else(|| metric_compat_family(&key))?;
     family_face(bundled, bold, italic)
+}
+
+fn script_faces(script: &str) -> Option<impl Iterator<Item = &'static BundledFontFace> + Clone> {
+    let files = catalog().script_fallback_order.get(script)?;
+    Some(files.iter().filter_map(|file| catalog().faces.iter().find(|face| &face.file == file)))
+}
+
+fn style_ladder(
+    faces: impl Iterator<Item = &'static BundledFontFace> + Clone,
+    bold: bool,
+    italic: bool,
+) -> Option<&'static BundledFontFace> {
+    let pick = |bold: bool, italic: bool| faces.clone().find(|face| matches_style(face, bold, italic));
+    pick(bold, italic)
+        .or_else(|| pick(bold, false))
+        .or_else(|| pick(false, false))
+        .or_else(|| faces.clone().next())
+}
+
+fn serif_family_for(
+    family: &str,
+    mut faces: impl Iterator<Item = &'static BundledFontFace>,
+    kai: bool,
+) -> Option<&'static str> {
+    if !kai && !looks_serif(family) {
+        return None;
+    }
+    faces
+        .find(|face| face.family.starts_with("Noto Serif "))
+        .map(|face| face.family.as_str())
 }
 
 pub fn resolve_script_fallback_face(
@@ -129,44 +279,43 @@ pub fn resolve_script_fallback_face(
     bold: bool,
     italic: bool,
 ) -> Option<&'static BundledFontFace> {
-    let files = catalog().script_fallback_order.get(script)?;
-    let faces: Vec<_> = files
-        .iter()
-        .filter_map(|file| catalog().faces.iter().find(|face| &face.file == file))
-        .collect();
-    faces
-        .iter()
-        .copied()
-        .find(|face| matches_style(face, bold, italic))
-        .or_else(|| {
-            faces
-                .iter()
-                .copied()
-                .find(|face| matches_style(face, bold, false))
-        })
-        .or_else(|| {
-            faces
-                .iter()
-                .copied()
-                .find(|face| matches_style(face, false, false))
-        })
-        .or_else(|| faces.first().copied())
+    style_ladder(script_faces(script)?, bold, italic)
 }
 
-/// The script fallback for text that requests `family`: the catalog's face for
-/// that family and script whatever the style, else [`resolve_script_fallback_face`].
+/// The script fallback for text that requests `family`: a CJK request keeps the
+/// family it names, or the script's serif for a serif name, when the script
+/// covers it; otherwise [`resolve_script_fallback_face`].
 pub fn resolve_family_script_fallback_face(
     family: &str,
     script: &str,
     bold: bool,
     italic: bool,
 ) -> Option<&'static BundledFontFace> {
-    catalog()
+    let key = key(family);
+    if let Some(face) = catalog()
         .requested_family_script_fallback
-        .get(&key(family))
+        .get(&key)
         .and_then(|scripts| scripts.get(script))
         .and_then(|file| catalog().faces.iter().find(|face| &face.file == file))
-        .or_else(|| resolve_script_fallback_face(script, bold, italic))
+    {
+        return Some(face);
+    }
+    let faces = script_faces(script)?;
+    if script.starts_with("cjk-") {
+        if let Some((family, weight)) = static_weight(family)
+            && let Some(face) = upright_face(faces.clone(), family, weight)
+        {
+            return Some(face);
+        }
+        let requested = metric_compat_family(&key).or_else(|| bundled_family_name(&key));
+        let preferred = requested
+            .filter(|family| *family != KAI_FAMILY && faces.clone().any(|face| face.family == *family))
+            .or_else(|| serif_family_for(family, faces.clone(), requested == Some(KAI_FAMILY)));
+        if let Some(preferred) = preferred {
+            return style_ladder(faces.filter(|face| face.family == preferred), bold, italic);
+        }
+    }
+    style_ladder(faces, bold, italic)
 }
 
 fn variant(family: &str, italic: bool, heavy: bool) -> Option<&'static BundledFontFace> {

@@ -27,18 +27,23 @@ fetches dependencies or runs at package installation.
 
 ## CJK pack
 
-Fetch the pinned, SHA-256-verified static OTF sources, then build the pack:
+The source lock covers the seven official static weights of regional Noto Sans
+and Serif (SC, TC, JP, KR), plus LXGW ZhenKai GB and both upstream licenses.
+`fetch-cjk.sh` verifies every SHA-256, downloads with bounded parallelism and
+reuses verified files from `FONT_SOURCE_CACHE`. It converts the pinned ZhenKai
+TTF into the renamed static `Northstar Kai` CFF face and records provenance.
 
 ```sh
-scripts/fonts/fetch-cjk.sh <dir>
-cargo run -p betteroffice-fonts --features build --bin fontpack -- build --src <dir> --out packages/fonts-cjk/assets --pack cjk --version <fonts-cjk version> --codec zstd
+cargo build --release -p betteroffice-fonts --features build --bin fontpack
+PYTHON=/tmp/fontpack-venv/bin/python FONT_SOURCE_CACHE=.source/font-source-cache \
+  scripts/fonts/build-cjk.sh .source/font-release/fonts-cjk
+bun scripts/fonts/generate-cjk-urls.ts .source/font-release/fonts-cjk/assets .source/font-release/fonts-cjk/src/index.ts
 ```
 
-For offline sources, pass a directory containing the five OTF basenames as the
-fetch script's second argument. Local files undergo the same SHA-256 checks.
-The builder requires an absent output directory; preserve `LICENSE` and
-`LICENSES` outside `assets`. These CFF faces use zstd only. Each family has one
-face, so the pack has no dictionaries.
+The output directory must not exist. For offline input, use
+`fetch-cjk.sh <directory> <local-source-directory>`; local sources receive the
+same hash checks. `sources.json` records source pins, conversion hashes and
+licenses. No source fetch runs during package installation.
 
 Before building, cut each face into a skeleton and outline chunks (same pinned
 fontTools as above):
@@ -59,3 +64,34 @@ The script checks that every chunk holds the GSUB closure of its codepoints and
 that the reassembled face keeps every other table and charstring; `fontpack`
 then compresses the files to `assets/<face>/`, checks that its own reassembly
 matches, and adds a `slices` block to the face's manifest row.
+
+## Versioned CDN publication
+
+Run the `Font CDN assets` workflow after selecting the font package version.
+Its build job produces the static CJK pack from the source lock, stages the
+Latin and international packs, and builds the matching manager decoder. Source
+downloads are cached across runs but always hash-checked. Publication is an explicit
+workflow input and uses the `font-cdn` environment. Configure required reviewers
+there, secrets `TOS_ACCESS_KEY` / `TOS_SECRET_KEY`, and environment variables
+`TOS_ENDPOINT`, `TOS_REGION`, `TOS_BUCKET`.
+
+`publish-cdn.py <package-directory> --publish --verify` publishes all four package
+directories from the CI artifact: `fonts-cjk/<version>/assets/...`,
+`fonts-latin/<version>/assets/...`, `fonts-intl/<version>/assets/...`, and
+`fonts/<version>/assets/...`, with licenses under each package version. The decoder
+is `fonts/<version>/dist/decoder/fontpack.wasm`. Versions come from each package's
+`package.json`, not from the application release.
+
+Different bytes at an existing object key are refused. Identical objects are reused
+only if their stored cache metadata also satisfies the immutable resource policy;
+publication never overwrites them. Binaries precede slice indexes and each pack's
+manifest. The final check reads every CDN object and verifies encoded length,
+SHA-256, matching CORS, and `Cache-Control: public, max-age=31536000, immutable`
+(a longer max-age is allowed; private/no-cache/no-store are refused).
+Do not deploy a consumer configured for these versions until publication and CDN
+verification pass. In the application, configure the CDN root before editor/session
+initialization; do not replace this pipeline with Go-hosted font assets.
+
+Application CI installs pinned packages; it does not fetch upstream fonts or
+publish the font CDN on every application build.
+
